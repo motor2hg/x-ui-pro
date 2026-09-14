@@ -13,40 +13,31 @@
 - Compatible with Cloudflare (only for WebSocket/GRPC)
 - Random 150+ fake template!
 - Linux Debian12/Ubuntu24!
-  >
-   **You need TWO domains or subdomains**
+
+
+  **You need TWO domains or subdomains**
   1. For panel and WebSocket/GRPC/HttpUgrade/SplitHttp
   2. For REALITY destination
-  >
   Get Free subdomains - https://scarce-hole-1e2.notion.site/14d1666462e48069818cf42553bfae1f?pvs=74
-  >
   RU instruction - https://scarce-hole-1e2.notion.site/3X-UI-pro-with-REALITY-panel-and-inbaunds-on-port-443-10d1666462e48085be0fee4c136ce417
   
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 ### Install X-UI-PRO motor2hg
-```
-bash <(wget -qO- https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install yes -panel 1 -ONLY_CF_IP_ALLOW no
-```
-> 
-> Do not change SubDomain for renew SSL❗
 
-### Install X-UI-PRO
+`bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n`
 
+or with wget:
 ```
-bash <(wget -qO- https://github.com/mozaroc/x-ui-pro/raw/master/x-ui-pro.sh) -install yes -panel 1 -ONLY_CF_IP_ALLOW no
+bash <(wget -qO- https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n
 ```
-> 
-> Do not change SubDomain for renew SSL❗
 
 
-**Uninstall X-UI-PRO**:x:
-```
-sudo su -c "bash <(wget -qO- https://raw.githubusercontent.com/mozaroc/x-ui-pro/master/x-ui-pro.sh) -Uninstall yes"
-```
+> Do not change SubDomain after install, otherwise SSL renewal will fail!
 
-**backup panel and nginx configs**:x:
+### Uninstall X-UI-PRO
+
 ```
-sudo su -c "bash <(wget -qO- https://raw.githubusercontent.com/mozaroc/x-ui-pro/master/backup.sh)"
+bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -uninstall y
 ```
 
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
