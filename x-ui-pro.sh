@@ -252,7 +252,7 @@ upstream www {
 
 server {
     proxy_protocol on;
-    set_real_ip_from unix:;
+    #set_real_ip_from unix:;# motor2hg directive is not allowed here in /etc/nginx/stream-enabled/stream.conf
     listen          443;
 	listen         [::]:443;
     proxy_pass      \$sni_name;
