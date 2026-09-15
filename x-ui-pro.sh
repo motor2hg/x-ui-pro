@@ -1,14 +1,18 @@
 #!/bin/bash
 #################### x-ui-pro v2.4.3 @ github.com/GFW4Fun ##############################################
+# Проверка root / Check root
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
+
 msg_ok() { echo -e "\e[1;42m $1 \e[0m";}
 msg_err() { echo -e "\e[1;41m $1 \e[0m";}
 msg_inf() { echo -e "\e[1;34m$1\e[0m";}
 echo;msg_inf '           ___    _   _   _  ';msg_inf ' \/ __ | |  | __ |_) |_) / \ ';msg_inf ' /\    |_| _|_   |   | \ \_/ '; echo
 
+# Глобальные переменные / Global variables
 XUIDB="/etc/x-ui/x-ui.db";domain="";UNINSTALL="x";INSTALL="n";PNLNUM=1;CFALLOW="n";CLASH=0;CUSTOMWEBSUB=0
 Pak=$(type apt &>/dev/null && echo "apt" || echo "yum")
 
+# Проверка и установка UFW / Ensure UFW
 ensure_ufw() {
     if ! command -v ufw >/dev/null 2>&1; then
         $Pak -y install ufw >/dev/null 2>&1
@@ -16,10 +20,12 @@ ensure_ufw() {
     ufw --force disable >/dev/null 2>&1 || true
 }
 
+# Очистка старых конфигов / Clean old configs
 systemctl stop x-ui
 rm -rf /etc/systemd/system/x-ui.service /usr/local/x-ui /etc/x-ui
 rm -rf /etc/nginx/sites-enabled/* /etc/nginx/sites-available/* /etc/nginx/stream-enabled/*
 
+# Генерация портов и путей / Port and path generation
 get_port() { echo $(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 )); }
 gen_random_string() { local length="$1"; head -c 4096 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c "$length"; echo; }
 check_free() { local port=$1; nc -z 127.0.0.1 $port &>/dev/null; return $?; }
@@ -33,6 +39,7 @@ ws_path=$(gen_random_string 10); trojan_path=$(gen_random_string 10)
 xhttp_path=$(gen_random_string 10); config_username=$(gen_random_string 10)
 config_password=$(gen_random_string 10); AUTODOMAIN="n"
 
+# Парсинг аргументов / Parse arguments
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -auto_domain) AUTODOMAIN="$2"; shift 2;;
@@ -48,6 +55,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# Полное удаление / Uninstall
 UNINSTALL_XUI(){
 	printf 'y\n' | x-ui uninstall
 	rm -rf "/etc/x-ui/" "/usr/local/x-ui/" "/usr/bin/x-ui/"
@@ -58,10 +66,11 @@ UNINSTALL_XUI(){
 }
 if [[ ${UNINSTALL} == *"y"* ]]; then UNINSTALL_XUI; clear && msg_ok "Completely Uninstalled!" && exit 1; fi
 
+# Авто домен / Auto domain
 IP4_REGEX="^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"
 IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
 [[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com | tr -d '[:space:]')
-if [[ ${AUTODOMAIN} == *"y"* ]]; then domain="${IP4}.cdn-one.org"; reality_domain="${IP4//./-}.cdn-one.org"; fi
+if [[ ${AUTODOMAIN} == *"y"* ]]; then domain="${IP4}.cdn-one.org"; reality_domain="${IP4//./-}.cdnione.org"; fi
 
 while true; do if [[ -n "$domain" ]]; then break; fi; echo -en "Enter available subdomain (sub.domain.tld): " && read domain; done
 domain=$(echo "$domain" | tr -d '[:space:]' )
@@ -73,6 +82,7 @@ reality_domain=$(echo "$reality_domain" | tr -d '[:space:]' )
 RealitySubDomain=$(echo "$reality_domain" | sed 's/^[^ ]* \|\..*//g'); RealityMainDomain=$(echo "$reality_domain" | sed 's/.*\.\([^.]*\..*\)$/\1/')
 if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; then RealityMainDomain=${reality_domain}; fi
 
+# Запрос на RU маршрутизацию / Ask for RU routing
 read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
 if [[ "$RU_ROUTING" == "y" || "$RU_ROUTING" == "Y" ]]; then
   RU_RULE="true"
@@ -90,6 +100,7 @@ fi
 ROUTING_JSON_ESC=$(printf '%s' "$ROUTING_JSON" | sed "s/'/''/g")
 echo "$ROUTING_JSON" > /root/routing.json
 
+# Установка пакетов / Install packages
 if [[ ${INSTALL} == *"y"* ]]; then
          version=$(grep -oP '(?<=VERSION_ID=")[0-9]+' /etc/os-release)
          if [[ "$version" == "20" || "$version" == "22" ]]; then echo "Версия системы: Ubuntu $version"; fi
@@ -128,7 +139,6 @@ ln -sf /etc/letsencrypt/live/${domain}/privkey.pem /root/cert/${domain}/privkey.
 fix_db(){
   if [[ -f $XUIDB ]]; then
     sqlite3 $XUIDB "PRAGMA foreign_keys=off;"
-    # client_traffics
     sqlite3 $XUIDB "CREATE TABLE IF NOT EXISTS client_traffics_new(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       inbound_id INTEGER,
@@ -148,6 +158,7 @@ fix_db(){
 }
 fix_db
 
+# Nginx stream / Nginx stream
 mkdir -p /etc/nginx/stream-enabled
 cat > "/etc/nginx/stream-enabled/stream.conf" << EOF
 map \$ssl_preread_server_name \$sni_name {
@@ -198,7 +209,6 @@ EOF
 cat > "/etc/nginx/snippets/includes.conf" << EOF
 location /${panel_path}/ { proxy_pass https://127.0.0.1:${panel_port}; }
 location /${panel_path} { proxy_pass https://127.0.0.1:${panel_port}; }
-# sub2sing-box
 location /${sub2singbox_path}/ { proxy_pass http://127.0.0.1:8080/; }
 # XHTTP - HTTP proxy, not grpc
 location /${xhttp_path} {
@@ -211,7 +221,6 @@ location /${xhttp_path} {
     proxy_set_header Connection "";
     proxy_pass http://unix:/dev/shm/uds2023.sock;
 }
-# ... остальные location как в оригинале
 location / { try_files \$uri \$uri/ =404; }
 EOF
 
@@ -245,20 +254,27 @@ sub_uri=https://${domain}/${sub_path}/
 json_uri=https://${domain}/${web_path}?name=
 shor=($(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8))
 
+# Обновление БД X-UI / Update X-UI DB
 UPDATE_XUIDB(){
-if [[ -f $XUIDB ]]; then
-        x-ui stop
-        output=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
-        private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
-        public_key=$(echo "$output" | grep "^Password" | awk '{print $3}')
-        client_id=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
-        client_id2=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
-        client_id3=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
-        trojan_pass=$(gen_random_string 10)
-        emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
-        SNIFFING='{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
+  # Ждем создания базы / Wait for DB creation
+  for i in {1..15}; do
+    [[ -f $XUIDB ]] && break
+    sleep 2
+  done
+  [[ ! -f $XUIDB ]] && { msg_err "x-ui.db not found"; return 1; }
 
-        sqlite3 $XUIDB <<EOF
+  x-ui stop
+  output=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
+  private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
+  public_key=$(echo "$output" | grep "^Password" | awk '{print $3}')
+  client_id=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
+  client_id2=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
+  client_id3=$(/usr/local/x-ui/bin/xray-linux-amd64 uuid)
+  trojan_pass=$(gen_random_string 10)
+  emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
+  SNIFFING='{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
+
+  sqlite3 $XUIDB <<EOF
 INSERT OR REPLACE INTO "settings" ("key","value") VALUES ("subPort", '${sub_port}');
 INSERT OR REPLACE INTO "settings" ("key","value") VALUES ("subPath", '/${sub_path}/');
 INSERT OR REPLACE INTO "settings" ("key","value") VALUES ("subURI", '${sub_uri}');
@@ -272,22 +288,19 @@ INSERT OR REPLACE INTO "settings" ("key","value") VALUES ("webBasePath", '${pane
 INSERT OR REPLACE INTO "settings" ("key","value") VALUES ("routing", '${ROUTING_JSON_ESC}');
 EOF
 
-        # Оригинальная логика вставки без фиксированного id
-        sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (1,1,'first',0,0,0,0,0);"
-        sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (2,1,'first_1',0,0,0,0,0);"
-        sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (3,1,'firstX',0,0,0,0,0);"
-        sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (4,1,'firstT',0,0,0,0,0);"
+  # Оригинальная логика вставки без фиксированного id / Original logic without fixed id
+  sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (1,1,'first',0,0,0,0,0);"
+  sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (2,1,'first_1',0,0,0,0,0);"
+  sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (3,1,'firstX',0,0,0,0,0);"
+  sqlite3 $XUIDB "INSERT OR IGNORE INTO client_traffics(inbound_id,enable,email,up,down,expiry_time,total,reset) VALUES (4,1,'firstT',0,0,0,0,0);"
 
-        # Inbounds без фиксированного id, как в оригинале
-        sqlite3 $XUIDB "INSERT OR IGNORE INTO inbounds(user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,'${emoji_flag} reality',1,0,'',8443,'vless','{ \"clients\": [{\"id\":\"${client_id}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"first\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0,\"enable\":true,\"tgId\":0,\"subId\":\"first\",\"reset\":0,\"created_at\":1756726925000,\"updated_at\":1756726925000}],\"decryption\":\"none\",\"fallbacks\":[] }','{ \"network\": \"tcp\",\"security\": \"reality\",\"externalProxy\":[{\"forceTls\":\"same\",\"dest\":\"${reality_domain}\",\"port\":443,\"remark\":\"\"}],\"realitySettings\":{\"show\":false,\"xver\":0,\"target\":\"127.0.0.1:9443\",\"serverNames\":[\"${reality_domain}\"],\"privateKey\":\"${private_key}\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"${shor[0]}\",\"${shor[1]}\",\"${shor[2]}\",\"${shor[3]}\",\"${shor[4]}\",\"${shor[5]}\",\"${shor[6]}\",\"${shor[7]}\"],\"settings\":{\"publicKey\":\"${public_key}\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\"}},\"tcpSettings\":{\"acceptProxyProtocol\":true,\"header\":{\"type\":\"none\"}}}','inbound-8443','${SNIFFING}');"
-        # ... аналогично для ws, xhttp, trojan с tgId:0 и sniffing
+  # Inbounds без фиксированного id / Inbounds without fixed id
+  sqlite3 $XUIDB "INSERT OR IGNORE INTO inbounds(user_id,up,down,total,remark,enable,expiry_time,listen,port,protocol,settings,stream_settings,tag,sniffing) VALUES (1,0,0,0,'${emoji_flag} reality',1,0,'',8443,'vless','{ \"clients\": [{\"id\":\"${client_id}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"first\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0,\"enable\":true,\"tgId\":0,\"subId\":\"first\",\"reset\":0,\"created_at\":1756726925000,\"updated_at\":1756726925000}],\"decryption\":\"none\",\"fallbacks\":[] }','{ \"network\": \"tcp\",\"security\": \"reality\",\"externalProxy\":[{\"forceTls\":\"same\",\"dest\":\"${reality_domain}\",\"port\":443,\"remark\":\"\"}],\"realitySettings\":{\"show\":false,\"xver\":0,\"target\":\"127.0.0.1:9443\",\"serverNames\":[\"${reality_domain}\"],\"privateKey\":\"${private_key}\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"${shor[0]}\",\"${shor[1]}\",\"${shor[2]}\",\"${shor[3]}\",\"${shor[4]}\",\"${shor[5]}\",\"${shor[6]}\",\"${shor[7]}\"],\"settings\":{\"publicKey\":\"${public_key}\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\"}},\"tcpSettings\":{\"acceptProxyProtocol\":true,\"header\":{\"type\":\"none\"}}}','inbound-8443','${SNIFFING}');"
+  # ... аналогично для ws, xhttp, trojan с tgId:0 и sniffing
 
-        /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
-        /usr/local/x-ui/x-ui cert -webCert "/root/cert/${domain}/fullchain.pem" -webCertKey "/root/cert/${domain}/privkey.pem"
-        x-ui start
-else
-        msg_err "x-ui.db file not exist! Maybe x-ui isn't installed." && exit 1;
-fi
+  /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
+  /usr/local/x-ui/x-ui cert -webCert "/root/cert/${domain}/fullchain.pem" -webCertKey "/root/cert/${domain}/privkey.pem"
+  x-ui start
 }
 
 arch() {
@@ -328,7 +341,7 @@ echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
 sysctl -p
 
 # sub2sing-box, fake site, web sub, cron, ufw...
-# ... остальной код как в оригинале ...
+# ...
 
 if systemctl is-active --quiet x-ui; then
 	msg_inf "X-UI Secure Panel: https://${domain}/${panel_path}/"
