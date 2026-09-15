@@ -25,9 +25,9 @@
   
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 ### Install X-UI-PRO motor2hg
-
-`bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n`
-
+```
+bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n
+```
 or with wget:
 ```
 bash <(wget -qO- https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n
