@@ -25,9 +25,9 @@
   
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
 ### Install X-UI-PRO motor2hg
-```
-bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n
-```
+
+`bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n`
+
 or with wget:
 ```
 bash <(wget -qO- https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -install y -panel 1 -ONLY_CF_IP_ALLOW n
@@ -43,6 +43,14 @@ bash <(curl -LsS https://github.com/motor2hg/x-ui-pro/raw/master/x-ui-pro.sh) -u
 ```
 
 ➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖
+
+## Troubleshooting
+### xxx nginx config not exist!
+
+Домен не резолвится на IP сервера. Проверь dig +short твой_домен.
+Не меняй subdomain после установки.
+На чистом VPS скрипт теперь сам ставит ufw если его нет.
+
 ### Screenshots :wrench:🐧⚙️
 >
 **How to open custom web sub page?**
