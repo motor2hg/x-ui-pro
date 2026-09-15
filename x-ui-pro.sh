@@ -11,6 +11,16 @@ msg_inf		 ' /\    |_| _|_   |   | \ \_/ '	; echo
 ##################################Variables#############################################################
 XUIDB="/etc/x-ui/x-ui.db";domain="";UNINSTALL="x";INSTALL="n";PNLNUM=1;CFALLOW="n";CLASH=0;CUSTOMWEBSUB=0
 Pak=$(type apt &>/dev/null && echo "apt" || echo "yum")
+
+# --- FIX ufw ---
+ensure_ufw() {
+    if ! command -v ufw >/dev/null 2>&1; then
+        $Pak -y install ufw >/dev/null 2>&1
+    fi
+    ufw --force disable >/dev/null 2>&1 || true
+}
+# --- END FIX ---
+
 systemctl stop x-ui
 rm -rf /etc/systemd/system/x-ui.service
 rm -rf /usr/local/x-ui
@@ -126,7 +136,6 @@ if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; the
 fi
 
 ###############################Install Packages#########################################################
-ufw disable
 if [[ ${INSTALL} == *"y"* ]]; then
          version=$(grep -oP '(?<=VERSION_ID=")[0-9]+' /etc/os-release)
          if [[ "$version" == "20" || "$version" == "22" ]]; then
@@ -135,7 +144,9 @@ if [[ ${INSTALL} == *"y"* ]]; then
 	$Pak -y update
 	$Pak -y install curl wget jq bash sudo nginx-full certbot python3-certbot-nginx sqlite3 ufw
 	systemctl daemon-reload && systemctl enable --now nginx
+    ensure_ufw
 fi
+
 systemctl stop nginx 
 fuser -k 80/tcp 80/udp 443/tcp 443/udp 2>/dev/null
 
@@ -194,7 +205,8 @@ fi
 
 #################################Nginx Config###########################################################
 mkdir -p /root/cert/${domain}
-chmod 755 /root/cert/*
+chmod 755 /root/cert/${domain}
+
 ln -sf /etc/letsencrypt/live/${domain}/fullchain.pem /root/cert/${domain}/fullchain.pem
 ln -sf /etc/letsencrypt/live/${domain}/privkey.pem /root/cert/${domain}/privkey.pem
 
@@ -206,16 +218,24 @@ map \$ssl_preread_server_name \$sni_name {
     ${domain}           www;
     default              xray;
 }
-upstream xray { server 127.0.0.1:8443; }
-upstream www { server 127.0.0.1:7443; }
+
+upstream xray {
+    server 127.0.0.1:8443;
+}
+
+upstream www {
+    server 127.0.0.1:7443;
+}
+
 server {
     proxy_protocol on;
     set_real_ip_from unix:;
-    listen 443;
-    listen [::]:443;
-    proxy_pass \$sni_name;
-    ssl_preread on;
+    listen          443;
+	listen         [::]:443;
+    proxy_pass      \$sni_name;
+    ssl_preread     on;
 }
+
 EOF
 
 grep -xqFR "stream { include /etc/nginx/stream-enabled/*.conf; }" /etc/nginx/* ||echo "stream { include /etc/nginx/stream-enabled/*.conf; }" >> /etc/nginx/nginx.conf
@@ -223,9 +243,241 @@ grep -xqFR "load_module modules/ngx_stream_module.so;" /etc/nginx/* || sed -i '1
 grep -xqFR "load_module modules/ngx_stream_geoip2_module.so;" /etc/nginx* || sed -i '2s/^/load_module \/usr\/lib\/nginx\/modules\/ngx_stream_geoip2_module.so; /' /etc/nginx/nginx.conf
 grep -xqFR "worker_rlimit_nofile 16384;" /etc/nginx/* ||echo "worker_rlimit_nofile 16384;" >> /etc/nginx/nginx.conf
 sed -i "/worker_connections/c\worker_connections 4096;" /etc/nginx/nginx.conf
+cat > "/etc/nginx/sites-available/80.conf" << EOF
+server {
+    listen 80;
+    server_name ${domain} ${reality_domain};
+    return 301 https://\$host\$request_uri;
+}
+EOF
 
-# ... далее весь твой Nginx конфиг без изменений ...
+cat > "/etc/nginx/sites-available/${domain}" << EOF
+server {
+	server_tokens off;
+	server_name ${domain};
+	listen 7443 ssl http2 proxy_protocol;
+	listen [::]:7443 ssl http2 proxy_protocol;
+	index index.html index.htm index.php index.nginx-debian.html;
+	root /var/www/html/;
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_ciphers HIGH:!aNULL:!eNULL:!MD5:!DES:!RC4:!ADH:!SSLv3:!EXP:!PSK:!DSS;
+	ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
+	if (\$host !~* ^(.+\.)?$domain\$ ){return 444;}
+	if (\$scheme ~* https) {set \$safe 1;}
+	if (\$ssl_server_name !~* ^(.+\.)?$domain\$ ) {set \$safe "\${safe}0"; }
+	if (\$safe = 10){return 444;}
+	if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
+	error_page 400 401 402 403 500 501 502 503 504 =404 /404;
+	proxy_intercept_errors on;
+	#X-UI Admin Panel
+	location /${panel_path}/ {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Upgrade websocket;
+        proxy_set_header Connection Upgrade;		
+        proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
 
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+
+        proxy_pass https://127.0.0.1:${panel_port};
+		break;
+	}
+        location /${panel_path} {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Upgrade websocket;
+        proxy_set_header Connection Upgrade;		
+        proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+
+        proxy_pass https://127.0.0.1:${panel_port};
+		break;
+	}
+	include /etc/nginx/snippets/includes.conf;
+
+}
+EOF
+
+cat > "/etc/nginx/snippets/includes.conf" << EOF
+  	#sub2sing-box
+	location /${sub2singbox_path}/ {
+		proxy_redirect off;
+		proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		proxy_pass http://127.0.0.1:8080/;
+		}
+    # Path to open clash.yaml and generate YAML
+    location ~ ^/${web_path}/clashmeta/(.+)$ {
+        default_type text/plain;
+        ssi on;
+        ssi_types text/plain;
+        set \$subid \$1;
+        root /var/www/subpage;
+        try_files /clash.yaml =404;
+    }
+    # web
+    location ~ ^/${web_path} {
+        root /var/www/subpage;
+        index index.html;
+        try_files \$uri \$uri/ /index.html =404;
+    }
+ 	#Subscription Path (simple/encode)
+        location /${sub_path} {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+	location /${sub_path}/ {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+	location /assets/ {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+	location /assets {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+	#Subscription Path (json/fragment)
+        location /${json_path} {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+	location /${json_path}/ {
+                if (\$hack = 1) {return 404;}
+                proxy_redirect off;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_pass https://127.0.0.1:${sub_port};
+                break;
+        }
+        #XHTTP
+        location /${xhttp_path} {
+          grpc_pass grpc://unix:/dev/shm/uds2023.sock;
+          grpc_buffer_size         16k;
+          grpc_socket_keepalive    on;
+          grpc_read_timeout        1h;
+          grpc_send_timeout        1h;
+          grpc_set_header Connection         "";
+          grpc_set_header X-Forwarded-For    \$proxy_add_x_forwarded_for;
+          grpc_set_header X-Forwarded-Proto  \$scheme;
+          grpc_set_header X-Forwarded-Port   \$server_port;
+          grpc_set_header Host               \$host;
+          grpc_set_header X-Forwarded-Host   \$host;
+          }
+ 	#Xray Config Path
+	location ~ ^/(?<fwdport>\d+)/(?<fwdpath>.*)\$ {
+		if (\$hack = 1) {return 404;}
+		client_max_body_size 0;
+		client_body_timeout 1d;
+		grpc_read_timeout 1d;
+		grpc_socket_keepalive on;
+		proxy_read_timeout 1d;
+		proxy_http_version 1.1;
+		proxy_buffering off;
+		proxy_request_buffering off;
+		proxy_socket_keepalive on;
+		proxy_set_header Upgrade \$http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		#proxy_set_header CF-IPCountry \$http_cf_ipcountry;
+		#proxy_set_header CF-IP \$realip_remote_addr;
+		if (\$content_type ~* "GRPC") {
+			grpc_pass grpc://127.0.0.1:\$fwdport\$is_args\$args;
+			break;
+		}
+		if (\$http_upgrade ~* "(WEBSOCKET|WS)") {
+			proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
+			break;
+	        }
+		if (\$request_method ~* ^(PUT|POST|GET)\$) {
+			proxy_pass http://127.0.0.1:\$fwdport\$is_args\$args;
+			break;
+		}
+	}
+	location / { try_files \$uri \$uri/ =404; }
+EOF
+
+cat > "/etc/nginx/sites-available/${reality_domain}" << EOF
+server {
+	server_tokens off;
+	server_name ${reality_domain};
+	listen 9443 ssl http2;
+	listen [::]:9443 ssl http2;
+	index index.html index.htm index.php index.nginx-debian.html;
+	root /var/www/html/;
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_ciphers HIGH:!aNULL:!eNULL:!MD5:!DES:!RC4:!ADH:!SSLv3:!EXP:!PSK:!DSS;
+	ssl_certificate /etc/letsencrypt/live/$reality_domain/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/$reality_domain/privkey.pem;
+	if (\$host !~* ^(.+\.)?${reality_domain}\$ ){return 444;}
+	if (\$scheme ~* https) {set \$safe 1;}
+	if (\$ssl_server_name !~* ^(.+\.)?${reality_domain}\$ ) {set \$safe "\${safe}0"; }
+	if (\$safe = 10){return 444;}
+	if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
+	error_page 400 401 402 403 500 501 502 503 504 =404 /404;
+	proxy_intercept_errors on;
+	#X-UI Admin Panel
+	location /${panel_path}/ {
+		proxy_redirect off;
+		proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		proxy_pass http://127.0.0.1:${panel_port};
+		break;
+	}
+        location /$panel_path {
+		proxy_redirect off;
+		proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		proxy_pass http://127.0.0.1:${panel_port};
+		break;
+	}
+include /etc/nginx/snippets/includes.conf;
+}
+EOF
 ##################################Check Nginx status####################################################
 if [[ -f "/etc/nginx/sites-available/${domain}" ]]; then
 	unlink "/etc/nginx/sites-enabled/default" >/dev/null 2>&1
@@ -331,7 +583,12 @@ if [[ -f $XUIDB ]]; then
 	     '1','0','0','0','${emoji_flag} trojan-grpc','1','0','','${trojan_port}','trojan','{ "clients": [{"comment":"","created_at":1756726925000,"email":"firstT","enable":true,"expiryTime":0,"limitIp":0,"password":"${trojan_pass}","reset":0,"subId":"first","tgId":0,"totalGB":0,"updated_at":1756726925000}],"fallbacks":[] }','{ "network":"grpc","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"grpcSettings":{"serviceName":"/${trojan_port}/${trojan_path}","authority":"${domain}","multiMode":false} }','inbound-${trojan_port}','{ "enabled":false,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
 	);
 EOF
-...
+/usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
+/usr/local/x-ui/x-ui cert -webCert "/root/cert/${domain}/fullchain.pem" -webCertKey "/root/cert/${domain}/privkey.pem"
+x-ui start
+else
+	msg_err "x-ui.db file not exist! Maybe x-ui isn't installed." && exit 1;
+fi
 }
 
 
@@ -430,11 +687,14 @@ crontab -l | grep -v "certbot\|x-ui\|cloudflareips" | crontab -
 (crontab -l 2>/dev/null; echo '@daily x-ui restart > /dev/null 2>&1 && nginx -s reload;') | crontab -
 (crontab -l 2>/dev/null; echo '@monthly certbot renew --nginx --non-interactive --post-hook "nginx -s reload" > /dev/null 2>&1;') | crontab -
 ##################################ufw###################################################################
-ufw disable
-ufw allow 22/tcp
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw --force enable  
+if command -v ufw >/dev/null 2>&1; then
+    ufw disable
+    ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw --force enable
+fi
+
 ##################################Show Details##########################################################
 if systemctl is-active --quiet x-ui; then clear
 	printf '0\n' | x-ui | grep --color=never -i ':'
