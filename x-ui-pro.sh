@@ -1,74 +1,38 @@
 #!/bin/bash
 #################### x-ui-pro v2.4.3 @ github.com/GFW4Fun ##############################################
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
-##############################INFO######################################################################
 msg_ok() { echo -e "\e[1;42m $1 \e[0m";}
 msg_err() { echo -e "\e[1;41m $1 \e[0m";}
 msg_inf() { echo -e "\e[1;34m$1\e[0m";}
-echo;msg_inf '           ___    _   _   _  '	;
-msg_inf		 ' \/ __ | |  | __ |_) |_) / \ '	;
-msg_inf		 ' /\    |_| _|_   |   | \ \_/ '	; echo
-##################################Variables#############################################################
+echo;msg_inf '           ___    _   _   _  ';msg_inf ' \/ __ | |  | __ |_) |_) / \ ';msg_inf ' /\    |_| _|_   |   | \ \_/ '; echo
+
 XUIDB="/etc/x-ui/x-ui.db";domain="";UNINSTALL="x";INSTALL="n";PNLNUM=1;CFALLOW="n";CLASH=0;CUSTOMWEBSUB=0
 Pak=$(type apt &>/dev/null && echo "apt" || echo "yum")
 
-# --- FIX ufw ---
 ensure_ufw() {
     if ! command -v ufw >/dev/null 2>&1; then
         $Pak -y install ufw >/dev/null 2>&1
     fi
     ufw --force disable >/dev/null 2>&1 || true
 }
-# --- END FIX ---
 
 systemctl stop x-ui
-rm -rf /etc/systemd/system/x-ui.service
-rm -rf /usr/local/x-ui
-rm -rf /etc/x-ui
-rm -rf /etc/nginx/sites-enabled/*
-rm -rf /etc/nginx/sites-available/*
-rm -rf /etc/nginx/stream-enabled/*
+rm -rf /etc/systemd/system/x-ui.service /usr/local/x-ui /etc/x-ui
+rm -rf /etc/nginx/sites-enabled/* /etc/nginx/sites-available/* /etc/nginx/stream-enabled/*
 
-##################################generate ports and paths#############################################################
-get_port() {
-	echo $(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 ))
-}
-gen_random_string() {
-    local length="$1"
-    head -c 4096 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c "$length"
-    echo
-}
-check_free() {
-	local port=$1
-	nc -z 127.0.0.1 $port &>/dev/null
-	return $?
-}
-make_port() {
-	while true; do
-		PORT=$(get_port)
-		if ! check_free $PORT; then 
-			echo $PORT
-			break
-		fi
-	done
-}
-sub_port=$(make_port)
-panel_port=$(make_port)
-web_path=$(gen_random_string 10)
-sub2singbox_path=$(gen_random_string 10)
-sub_path=$(gen_random_string 10)
-json_path=$(gen_random_string 10)
-panel_path=$(gen_random_string 10)
-ws_port=$(make_port)
-trojan_port=$(make_port)
-ws_path=$(gen_random_string 10)
-trojan_path=$(gen_random_string 10)
-xhttp_path=$(gen_random_string 10)
-config_username=$(gen_random_string 10)
-config_password=$(gen_random_string 10)
-AUTODOMAIN="n"
+get_port() { echo $(( ((RANDOM<<15)|RANDOM) % 49152 + 10000 )); }
+gen_random_string() { local length="$1"; head -c 4096 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c "$length"; echo; }
+check_free() { local port=$1; nc -z 127.0.0.1 $port &>/dev/null; return $?; }
+make_port() { while true; do PORT=$(get_port); if ! check_free $PORT; then echo $PORT; break; fi; done; }
 
-################################Get arguments###########################################################
+sub_port=$(make_port); panel_port=$(make_port); web_path=$(gen_random_string 10)
+sub2singbox_path=$(gen_random_string 10); sub_path=$(gen_random_string 10)
+json_path=$(gen_random_string 10); panel_path=$(gen_random_string 10)
+ws_port=$(make_port); trojan_port=$(make_port)
+ws_path=$(gen_random_string 10); trojan_path=$(gen_random_string 10)
+xhttp_path=$(gen_random_string 10); config_username=$(gen_random_string 10)
+config_password=$(gen_random_string 10); AUTODOMAIN="n"
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -auto_domain) AUTODOMAIN="$2"; shift 2;;
@@ -84,73 +48,42 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-##############################Uninstall#################################################################
 UNINSTALL_XUI(){
 	printf 'y\n' | x-ui uninstall
 	rm -rf "/etc/x-ui/" "/usr/local/x-ui/" "/usr/bin/x-ui/"
 	$Pak -y remove nginx nginx-common nginx-core nginx-full python3-certbot-nginx
 	$Pak -y purge nginx nginx-common nginx-core nginx-full python3-certbot-nginx
-	$Pak -y autoremove
-	$Pak -y autoclean
+	$Pak -y autoremove; $Pak -y autoclean
 	rm -rf "/var/www/html/" "/etc/nginx/" "/usr/share/nginx/" 
 }
-if [[ ${UNINSTALL} == *"y"* ]]; then
-	UNINSTALL_XUI	
-	clear && msg_ok "Completely Uninstalled!" && exit 1
-fi
+if [[ ${UNINSTALL} == *"y"* ]]; then UNINSTALL_XUI; clear && msg_ok "Completely Uninstalled!" && exit 1; fi
 
 IP4_REGEX="^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"
 IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
 [[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com | tr -d '[:space:]')
+if [[ ${AUTODOMAIN} == *"y"* ]]; then domain="${IP4}.cdn-one.org"; reality_domain="${IP4//./-}.cdn-one.org"; fi
 
-if [[ ${AUTODOMAIN} == *"y"* ]]; then
-    domain="${IP4}.cdn-one.org"
-    reality_domain="${IP4//./-}.cdn-one.org"
-fi
+while true; do if [[ -n "$domain" ]]; then break; fi; echo -en "Enter available subdomain (sub.domain.tld): " && read domain; done
+domain=$(echo "$domain" | tr -d '[:space:]' )
+SubDomain=$(echo "$domain" | sed 's/^[^ ]* \|\..*//g'); MainDomain=$(echo "$domain" | sed 's/.*\.\([^.]*\..*\)$/\1/')
+if [[ "${SubDomain}.${MainDomain}" != "${domain}" ]] ; then MainDomain=${domain}; fi
 
-##############################Domain Validations########################################################
-while true; do	
-	if [[ -n "$domain" ]]; then
-		break
-	fi
-	echo -en "Enter available subdomain (sub.domain.tld): " && read domain 
-done
-domain=$(echo "$domain" 2>&1 | tr -d '[:space:]' )
-SubDomain=$(echo "$domain" 2>&1 | sed 's/^[^ ]* \|\..*//g')
-MainDomain=$(echo "$domain" 2>&1 | sed 's/.*\.\([^.]*\..*\)$/\1/')
-if [[ "${SubDomain}.${MainDomain}" != "${domain}" ]] ; then
-	MainDomain=${domain}
-fi
+while true; do if [[ -n "$reality_domain" ]]; then break; fi; echo -en "Enter available subdomain for REALITY (sub.domain.tld): " && read reality_domain; done
+reality_domain=$(echo "$reality_domain" | tr -d '[:space:]' )
+RealitySubDomain=$(echo "$reality_domain" | sed 's/^[^ ]* \|\..*//g'); RealityMainDomain=$(echo "$reality_domain" | sed 's/.*\.\([^.]*\..*\)$/\1/')
+if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; then RealityMainDomain=${reality_domain}; fi
 
-while true; do	
-	if [[ -n "$reality_domain" ]]; then
-		break
-	fi
-	echo -en "Enter available subdomain for REALITY (sub.domain.tld): " && read reality_domain 
-done
-reality_domain=$(echo "$reality_domain" 2>&1 | tr -d '[:space:]' )
-RealitySubDomain=$(echo "$reality_domain" 2>&1 | sed 's/^[^ ]* \|\..*//g')
-RealityMainDomain=$(echo "$reality_domain" 2>&1 | sed 's/.*\.\([^.]*\..*\)$/\1/')
-if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; then
-	RealityMainDomain=${reality_domain}
-fi
-
-###############################Install Packages#########################################################
 if [[ ${INSTALL} == *"y"* ]]; then
          version=$(grep -oP '(?<=VERSION_ID=")[0-9]+' /etc/os-release)
-         if [[ "$version" == "20" || "$version" == "22" ]]; then
-              echo "Версия системы: Ubuntu $version"
-         fi
+         if [[ "$version" == "20" || "$version" == "22" ]]; then echo "Версия системы: Ubuntu $version"; fi
 	$Pak -y update
 	$Pak -y install curl wget jq bash sudo nginx-full certbot python3-certbot-nginx sqlite3 ufw
 	systemctl daemon-reload && systemctl enable --now nginx
     ensure_ufw
 fi
-
 systemctl stop nginx 
 fuser -k 80/tcp 80/udp 443/tcp 443/udp 2>/dev/null
 
-##################################GET SERVER IPv4-6#####################################################
 IP4_REGEX="^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"
 IP6_REGEX="([a-f0-9:]+:+)+[a-f0-9]+"
 IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
@@ -158,43 +91,22 @@ IP6=$(ip route get 2620:fe::fe 2>&1 | grep -Po -- 'src \K\S*')
 [[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com);
 [[ $IP6 =~ $IP6_REGEX ]] || IP6=$(curl -s ipv6.icanhazip.com);
 
-##############################Install SSL###############################################################
-resolve_to_ip () {
-    local host="$1"
-    local a
-    a=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1{print $1}')
-    [[ -n "$a" ]] && [[ "$a" == "$IP4" ]]
-}
+resolve_to_ip () { local host="$1"; local a; a=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1{print $1}'); [[ -n "$a" ]] && [[ "$a" == "$IP4" ]]; }
 if [[ ${AUTODOMAIN} == *"y"* ]]; then
-    if ! resolve_to_ip "$domain"; then
-        msg_err "Auto-domain $domain does not resolve to this server IP ($IP4). Fix DNS/service and retry."
-        exit 1
-    fi
-    if ! resolve_to_ip "$reality_domain"; then
-        msg_err "Auto-domain $reality_domain does not resolve to this server IP ($IP4). Fix DNS/service and retry."
-        exit 1
-    fi
+    if ! resolve_to_ip "$domain"; then msg_err "Auto-domain $domain does not resolve to this server IP ($IP4). Fix DNS/service and retry."; exit 1; fi
+    if ! resolve_to_ip "$reality_domain"; then msg_err "Auto-domain $reality_domain does not resolve to this server IP ($IP4). Fix DNS/service and retry."; exit 1; fi
 fi
 
 certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$domain"
-if [[ ! -d "/etc/letsencrypt/live/${domain}/" ]]; then
- 	systemctl start nginx >/dev/null 2>&1
-	msg_err "$domain SSL could not be generated! Check Domain/IP Or Enter new domain!" && exit 1
-fi
-
+if [[ ! -d "/etc/letsencrypt/live/${domain}/" ]]; then systemctl start nginx >/dev/null 2>&1; msg_err "$domain SSL could not be generated! Check Domain/IP Or Enter new domain!" && exit 1; fi
 certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$reality_domain"
-if [[ ! -d "/etc/letsencrypt/live/${reality_domain}/" ]]; then
- 	systemctl start nginx >/dev/null 2>&1
-	msg_err "$reality_domain SSL could not be generated! Check Domain/IP Or Enter new domain!" && exit 1
-fi
+if [[ ! -d "/etc/letsencrypt/live/${reality_domain}/" ]]; then systemctl start nginx >/dev/null 2>&1; msg_err "$reality_domain SSL could not be generated! Check Domain/IP Or Enter new domain!" && exit 1; fi
 
-###################################Get Installed XUI Port/Path##########################################
 if [[ -f $XUIDB ]]; then
 	XUIPORT=$(sqlite3 -list $XUIDB 'SELECT "value" FROM settings WHERE "key"="webPort" LIMIT 1;' 2>&1)
 	XUIPATH=$(sqlite3 -list $XUIDB 'SELECT "value" FROM settings WHERE "key"="webBasePath" LIMIT 1;' 2>&1)
 if [[ $XUIPORT -gt 0 && $XUIPORT != "54321" && $XUIPORT != "2053" ]] && [[ ${#XUIPORT} -gt 4 ]]; then
-	RNDSTR=$(echo "$XUIPATH" 2>&1 | tr -d '/')
-	PORT=$XUIPORT
+	RNDSTR=$(echo "$XUIPATH" 2>&1 | tr -d '/'); PORT=$XUIPORT
 	sqlite3 $XUIDB <<EOF
 	DELETE FROM "settings" WHERE ( "key"="webCertFile" ) OR ( "key"="webKeyFile" ); 
 	INSERT INTO "settings" ("key", "value") VALUES ("webCertFile",  "");
@@ -203,10 +115,8 @@ EOF
 fi
 fi
 
-#################################Nginx Config###########################################################
 mkdir -p /root/cert/${domain}
 chmod 755 /root/cert/${domain}
-
 ln -sf /etc/letsencrypt/live/${domain}/fullchain.pem /root/cert/${domain}/fullchain.pem
 ln -sf /etc/letsencrypt/live/${domain}/privkey.pem /root/cert/${domain}/privkey.pem
 
@@ -218,24 +128,15 @@ map \$ssl_preread_server_name \$sni_name {
     ${domain}           www;
     default              xray;
 }
-
-upstream xray {
-    server 127.0.0.1:8443;
-}
-
-upstream www {
-    server 127.0.0.1:7443;
-}
-
+upstream xray { server 127.0.0.1:8443; }
+upstream www { server 127.0.0.1:7443; }
 server {
     proxy_protocol on;
-    #set_real_ip_from unix:; #onle http
-    listen          443;
-	listen         [::]:443;
-    proxy_pass      \$sni_name;
-    ssl_preread     on;
+    listen 443;
+    listen [::]:443;
+    proxy_pass \$sni_name;
+    ssl_preread on;
 }
-
 EOF
 
 grep -xqFR "stream { include /etc/nginx/stream-enabled/*.conf; }" /etc/nginx/* ||echo "stream { include /etc/nginx/stream-enabled/*.conf; }" >> /etc/nginx/nginx.conf
@@ -243,6 +144,7 @@ grep -xqFR "load_module modules/ngx_stream_module.so;" /etc/nginx/* || sed -i '1
 grep -xqFR "load_module modules/ngx_stream_geoip2_module.so;" /etc/nginx* || sed -i '2s/^/load_module \/usr\/lib\/nginx\/modules\/ngx_stream_geoip2_module.so; /' /etc/nginx/nginx.conf
 grep -xqFR "worker_rlimit_nofile 16384;" /etc/nginx/* ||echo "worker_rlimit_nofile 16384;" >> /etc/nginx/nginx.conf
 sed -i "/worker_connections/c\worker_connections 4096;" /etc/nginx/nginx.conf
+
 cat > "/etc/nginx/sites-available/80.conf" << EOF
 server {
     listen 80;
@@ -270,7 +172,6 @@ server {
 	if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
 	error_page 400 401 402 403 500 501 502 503 504 =404 /404;
 	proxy_intercept_errors on;
-	#X-UI Admin Panel
 	location /${panel_path}/ {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -281,10 +182,8 @@ server {
 		proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-
         proxy_pass https://127.0.0.1:${panel_port};
 		break;
 	}
@@ -298,15 +197,12 @@ server {
 		proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
-
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-
         proxy_pass https://127.0.0.1:${panel_port};
 		break;
 	}
 	include /etc/nginx/snippets/includes.conf;
-
 }
 EOF
 
@@ -421,8 +317,6 @@ cat > "/etc/nginx/snippets/includes.conf" << EOF
 		proxy_set_header Host \$host;
 		proxy_set_header X-Real-IP \$remote_addr;
 		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-		#proxy_set_header CF-IPCountry \$http_cf_ipcountry;
-		#proxy_set_header CF-IP \$realip_remote_addr;
 		if (\$content_type ~* "GRPC") {
 			grpc_pass grpc://127.0.0.1:\$fwdport\$is_args\$args;
 			break;
@@ -458,7 +352,6 @@ server {
 	if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
 	error_page 400 401 402 403 500 501 502 503 504 =404 /404;
 	proxy_intercept_errors on;
-	#X-UI Admin Panel
 	location /${panel_path}/ {
 		proxy_redirect off;
 		proxy_set_header Host \$host;
@@ -478,12 +371,12 @@ server {
 include /etc/nginx/snippets/includes.conf;
 }
 EOF
-##################################Check Nginx status####################################################
+
 if [[ -f "/etc/nginx/sites-available/${domain}" ]]; then
 	unlink "/etc/nginx/sites-enabled/default" >/dev/null 2>&1
 	rm -f "/etc/nginx/sites-enabled/default" "/etc/nginx/sites-available/default"
 	ln -s "/etc/nginx/sites-available/${domain}" "/etc/nginx/sites-enabled/" 2>/dev/null
-        ln -s "/etc/nginx/sites-available/${reality_domain}" "/etc/nginx/sites-enabled/" 2>/dev/null
+    ln -s "/etc/nginx/sites-available/${reality_domain}" "/etc/nginx/sites-enabled/" 2>/dev/null
 	ln -s "/etc/nginx/sites-available/80.conf" "/etc/nginx/sites-enabled/" 2>/dev/null
 else
 	msg_err "${domain} nginx config not exist!" && exit 1
@@ -495,12 +388,10 @@ else
 	systemctl start nginx 
 fi
 
-##############################generate uri's###########################################################
 sub_uri=https://${domain}/${sub_path}/
 json_uri=https://${domain}/${web_path}?name=
 shor=($(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8))
 
-########################################Update X-UI Port/Path for first INSTALL#########################
 UPDATE_XUIDB(){
 if [[ -f $XUIDB ]]; then
         x-ui stop
@@ -591,15 +482,44 @@ else
 fi
 }
 
-
-install_panel() {
-    apt-get update && apt-get install -y -q wget curl tar tzdata
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+arch() {
+    case "$(uname -m)" in
+        x86_64 | x64 | amd64) echo 'amd64' ;;
+        i*86 | x86) echo '386' ;;
+        armv8* | armv8 | arm64 | aarch64) echo 'arm64' ;;
+        armv7* | armv7 | arm) echo 'armv7' ;;
+        armv6* | armv6) echo 'armv6' ;;
+        armv5* | armv5) echo 'armv5' ;;
+        s390x) echo 's390x' ;;
+        *) echo -e "${green}Unsupported CPU architecture! ${plain}" && rm -f install.sh && exit 1 ;;
+    esac
 }
 
 config_after_install() {
             /usr/local/x-ui/x-ui setting -username "asdfasdf" -password "asdfasdf" -port "2096" -webBasePath "asdfasdf"    
             /usr/local/x-ui/x-ui migrate
+}
+
+install_panel() {
+apt-get update && apt-get install -y -q wget curl tar tzdata
+    cd /usr/local/
+    tag_version="v3.7.0"
+    wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+    if [[ $? -ne 0 ]]; then echo -e "${red}Download x-ui failed${plain}"; exit 1; fi
+    wget -O /usr/bin/x-ui-temp https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh
+    if [[ $? -ne 0 ]]; then echo -e "${red}Failed to download x-ui.sh${plain}"; exit 1; fi
+    if [[ -e /usr/local/x-ui/ ]]; then systemctl stop x-ui; rm /usr/local/x-ui/ -rf; fi
+    tar zxvf x-ui-linux-$(arch).tar.gz; rm x-ui-linux-$(arch).tar.gz -f
+    cd x-ui; chmod +x x-ui; chmod +x x-ui.sh
+    if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then mv bin/xray-linux-$(arch) bin/xray-linux-arm; chmod +x bin/xray-linux-arm; fi
+    chmod +x x-ui bin/xray-linux-$(arch)
+    mv -f /usr/bin/x-ui-temp /usr/bin/x-ui; chmod +x /usr/bin/x-ui
+    config_after_install
+    cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
+    systemctl daemon-reload
+    systemctl enable x-ui
+    systemctl start x-ui
+    echo -e "${green}x-ui ${tag_version} installation finished${plain}"
 }
 
 if systemctl is-active --quiet x-ui; then
@@ -613,7 +533,6 @@ else
 	x-ui restart
 fi
 
-######################enable bbr and tune system########################################################
 apt-get install -yqq --no-install-recommends ca-certificates
 echo "net.core.default_qdisc=fq" | tee -a /etc/sysctl.conf
 echo "net.ipv4.tcp_congestion_control=bbr" | tee -a /etc/sysctl.conf
@@ -627,39 +546,27 @@ echo "net.ipv4.tcp_rmem = 4096 87380 16777216" | tee -a /etc/sysctl.conf
 echo "net.ipv4.tcp_wmem = 4096 65536 16777216" | tee -a /etc/sysctl.conf
 sysctl -p
 
-######################install_sub2sing-box#################################################################
-if pgrep -x "sub2sing-box" > /dev/null; then
-    echo "kill sub2sing-box..."
-    pkill -x "sub2sing-box"
-fi
-if [ -f "/usr/bin/sub2sing-box" ]; then
-    echo "delete sub2sing-box..."
-    rm -f /usr/bin/sub2sing-box
-fi
+if pgrep -x "sub2sing-box" > /dev/null; then pkill -x "sub2sing-box"; fi
+if [ -f "/usr/bin/sub2sing-box" ]; then rm -f /usr/bin/sub2sing-box; fi
 wget -P /root/ https://github.com/legiz-ru/sub2sing-box/releases/download/v0.0.9/sub2sing-box_0.0.9_linux_amd64.tar.gz
 tar -xvzf /root/sub2sing-box_0.0.9_linux_amd64.tar.gz -C /root/ --strip-components=1 sub2sing-box_0.0.9_linux_amd64/sub2sing-box
-mv /root/sub2sing-box /usr/bin/
-chmod +x /usr/bin/sub2sing-box
+mv /root/sub2sing-box /usr/bin/; chmod +x /usr/bin/sub2sing-box
 rm /root/sub2sing-box_0.0.9_linux_amd64.tar.gz
 su -c "/usr/bin/sub2sing-box server --bind 127.0.0.1 --port 8080 & disown" root
 
-######################install_fake_site#################################################################
 FAKE_SITE_TMP=$(mktemp -d)
 if wget -qO "$FAKE_SITE_TMP/repo.tar.gz" "https://github.com/mozaroc/3x-ui-pro/archive/refs/heads/main.tar.gz" \
 	&& tar -xzf "$FAKE_SITE_TMP/repo.tar.gz" -C "$FAKE_SITE_TMP" --strip-components=3 "3x-ui-pro-main/assets/fake-sites"; then
 	FAKE_SITES=("$FAKE_SITE_TMP"/site-*/)
 	FAKE_SITE="${FAKE_SITES[$((RANDOM % ${#FAKE_SITES[@]}))]}"
 	msg_inf "Random fake site template: $(basename "$FAKE_SITE")"
-	mkdir -p /var/www/html
-	rm -rf /var/www/html/*
-	cp -a "$FAKE_SITE". /var/www/html/
+	mkdir -p /var/www/html; rm -rf /var/www/html/*; cp -a "$FAKE_SITE". /var/www/html/
 	msg_ok "Fake site installed successfully!"
 else
 	msg_err "Failed to download fake site templates!"
 fi
 rm -rf "$FAKE_SITE_TMP"
 
-######################install_web_sub_page##############################################################
 URL_SUB_PAGE=( "https://github.com/legiz-ru/x-ui-pro/raw/master/sub-3x-ui.html"
 		"https://github.com/legiz-ru/x-ui-pro/raw/master/sub-3x-ui-classical.html"
 	)
@@ -681,12 +588,11 @@ sed -i "s#\${SUB_PATH}#$sub_path#g" "$DEST_FILE_SUB_PAGE"
 sed -i "s#\${SUB_PATH}#$sub_path#g" "$DEST_FILE_CLASH_SUB"
 sed -i "s|sub.legiz.ru|$domain/$sub2singbox_path|g" "$DEST_FILE_SUB_PAGE"
 
-######################cronjob for ssl/reload service/cloudflareips######################################
 crontab -l | grep -v "certbot\|x-ui\|cloudflareips" | crontab -
 (crontab -l 2>/dev/null; echo '@reboot /usr/bin/sub2sing-box server --bind 127.0.0.1 --port 8080 > /dev/null 2>&1') | crontab -
 (crontab -l 2>/dev/null; echo '@daily x-ui restart > /dev/null 2>&1 && nginx -s reload;') | crontab -
 (crontab -l 2>/dev/null; echo '@monthly certbot renew --nginx --non-interactive --post-hook "nginx -s reload" > /dev/null 2>&1;') | crontab -
-##################################ufw###################################################################
+
 if command -v ufw >/dev/null 2>&1; then
     ufw disable
     ufw allow 22/tcp
@@ -695,7 +601,7 @@ if command -v ufw >/dev/null 2>&1; then
     ufw --force enable
 fi
 
-##################################Show Details##########################################################
+#####################################Show Details##########################################################
 if systemctl is-active --quiet x-ui; then clear
 	printf '0\n' | x-ui | grep --color=never -i ':'
 	msg_inf "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
