@@ -313,7 +313,7 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        proxy_pass https://127.0.0.1:${panel_port};
+        proxy_pass http://127.0.0.1:${panel_port};
         break;
     }
     location /${panel_path} {
@@ -328,7 +328,7 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        proxy_pass https://127.0.0.1:${panel_port};
+        proxy_pass http://127.0.0.1:${panel_port};
         break;
     }
     include /etc/nginx/snippets/includes.conf;
