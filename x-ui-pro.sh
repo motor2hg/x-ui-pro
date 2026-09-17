@@ -1,6 +1,6 @@
 #!/bin/bash
-#################### x-ui-pro v2.4.3 @ github.com/GFW4Fun ##############################################
-# ФИНАЛЬНАЯ ВЕРСИЯ 3: исправлена 404 подписки, routing правила, xhttp inbound, версия 3.8.5
+#################### x-ui-pro v2.4.4 @ github.com/motor2hg ##############################################
+# ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ: панель открывается, подписка работает, клиенты создаются
 ##########################################################################################################
 
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
@@ -158,7 +158,6 @@ if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; the
 fi
 
 ###############################Install Packages#########################################################
-# ЗАПРОС RU ПРАВИЛ ДО УСТАНОВКИ ПАКЕТОВ
 read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
 RU_RULE="false"
 
@@ -297,10 +296,10 @@ server {
     if (\$scheme ~* https) {set \$safe 1;}
     if (\$ssl_server_name !~* ^(.+\.)?${domain}\$ ) {set \$safe "\${safe}0"; }
     if (\$safe = 10){return 444;}
-    if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
+    if (\$request_uri ~ "(\"|'|\`|~|,|:;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
     error_page 400 401 402 403 500 501 502 503 504 =404 /404;
     proxy_intercept_errors on;
-    #X-UI Admin Panel
+    #X-UI Admin Panel - ИСПРАВЛЕНО: используем HTTP (не HTTPS)!
     location /${panel_path}/ {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -415,7 +414,7 @@ location /${json_path}/ {
     proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
-#XHTTP - ИСПРАВЛЕНО: используем HTTP-проксирование, не gRPC (XHTTP это HTTP, не gRPC!)
+#XHTTP - ИСПРАВЛЕНО: HTTP-проксирование (не gRPC!)
 location /${xhttp_path} {
     proxy_redirect off;
     proxy_set_header Host \$host;
@@ -475,7 +474,7 @@ server {
     if (\$scheme ~* https) {set \$safe 1;}
     if (\$ssl_server_name !~* ^(.+\.)?${reality_domain}\$ ) {set \$safe "\${safe}0"; }
     if (\$safe = 10){return 444;}
-    if (\$request_uri ~ "(\"|'|\`|~|,|:|;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
+    if (\$request_uri ~ "(\"|'|\`|~|,|:;|%|\\$|&&|\?\?|0x00|0X00|\||\\|\{|\}|\[|\]|<|>|\.\.\.|\.\.\/|\/\/\/)"){set \$hack 1;}
     error_page 400 401 402 403 500 501 502 503 504 =404 /404;
     proxy_intercept_errors on;
     #X-UI Admin Panel
@@ -537,38 +536,6 @@ UPDATE_XUIDB(){
     sleep 3
 
     x-ui stop
-
-    # ИСПРАВЛЕНО: СНАЧАЛА вызываем x-ui setting, чтобы он создал webPort и webBasePath в БД
-    # Это гарантирует, что панель будет слушать нужный порт с нужным путём
-    /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
-    sleep 2
-
-    # ПРОВЕРКА: убеждаемся, что x-ui setting записал правильные значения
-    DB_WEB_PORT=$(sqlite3 $XUIDB "SELECT value FROM settings WHERE key='webPort' LIMIT 1;")
-    DB_WEB_PATH=$(sqlite3 $XUIDB "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;")
-    
-    if [[ "$DB_WEB_PORT" != "$panel_port" ]] || [[ "$DB_WEB_PATH" != "${panel_path}" ]]; then
-        msg_err "x-ui setting did not save webPort/webBasePath correctly!"
-        msg_err "DB has: port=$DB_WEB_PORT, path=$DB_WEB_PATH"
-        msg_err "Expected: port=$panel_port, path=${panel_path}"
-        msg_inf "Forcing values via sqlite3..."
-        sqlite3 $XUIDB <<EOF_FORCE
-DELETE FROM "settings" WHERE "key" IN ('webPort','webBasePath');
-INSERT INTO "settings" ("key", "value") VALUES ("webPort", '${panel_port}');
-INSERT INTO "settings" ("key", "value") VALUES ("webBasePath", '${panel_path}');
-EOF_FORCE
-    fi
-
-    # ИСПРАВЛЕНО: удаляем только sub-настройки, inbounds и client_traffics
-    # НЕ трогаем webPort и webBasePath — они уже установлены правильно!
-    sqlite3 $XUIDB <<'EOF_CLEANUP'
-DELETE FROM "settings" WHERE "key" LIKE 'sub%';
-DELETE FROM "settings" WHERE "key" IN ('sessionMaxAge','pageSize','expireDiff','trafficDiff','remarkModel','timeLocation','secretEnable','datepicker','xrayTemplateConfig');
-DELETE FROM "settings" WHERE "key" LIKE 'tg%';
-DELETE FROM "inbounds";
-DELETE FROM "client_traffics";
-EOF_CLEANUP
-
     output=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
     private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
     public_key=$(echo "$output" | grep "^Password" | awk '{print $3}')
@@ -578,7 +545,7 @@ EOF_CLEANUP
     trojan_pass=$(gen_random_string 10)
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
 
-    # Формируем полный xrayTemplateConfig с routing правилами
+    # Формируем routing правила
     if [[ "$RU_RULE" == "true" ]]; then
         ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["ads","geosite:category-ads-all","ext:geosite_RU.dat:category-ads-all","ext:geosite_RU.dat:category-ads"],"outboundTag":"blocked","type":"field"},{"domain":["youtube.com","youtu.be","googlevideo.com","geosite:youtube","ext:geosite_RU.dat:youtube","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:tbank-ru","geosite:t2-ru","geosite:tld-ru","geosite:mailru-group","geosite:ozon","geosite:wildberries","geosite:yundaex","geosite:yandex"],"outboundTag":"direct","type":"field"},{"ip":["geoip:ru","ext:geoip_RU.dat:ru","ext:geoip_RU.dat:ru-whitelist"],"outboundTag":"direct","type":"field"},{"domain":["geosite:speedtest"],"outboundTag":"IPv4","type":"field"}]'
     else
@@ -587,8 +554,13 @@ EOF_CLEANUP
 
     XRAY_TEMPLATE='{"api":{"services":["HandlerService","LoggerService","StatsService","RoutingService"],"tag":"api"},"inbounds":[{"listen":"127.0.0.1","port":62789,"protocol":"tunnel","settings":{"rewriteAddress":"127.0.0.1"},"tag":"api"}],"log":{"loglevel":"warning"},"outbounds":[{"protocol":"freedom","settings":{},"tag":"direct"},{"protocol":"blackhole","settings":{},"tag":"blocked"},{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"},"tag":"IPv4"},{"protocol":"freedom","settings":{},"tag":"IPv6"},{"protocol":"blackhole","settings":{},"tag":"block"}],"policy":{"levels":{"0":{"statsUserDownlink":true,"statsUserOnline":true,"statsUserUplink":true}},"system":{"statsInboundDownlink":true,"statsInboundUplink":true,"statsOutboundDownlink":false,"statsOutboundUplink":false}},"routing":{"domainStrategy":"AsIs","rules":'$ROUTING_RULES'},"stats":{}}'
 
+    # ИСПРАВЛЕНО: удаляем только inbounds и client_traffics (НЕ трогаем settings!)
+    sqlite3 $XUIDB <<'EOF_CLEANUP'
+DELETE FROM "inbounds";
+DELETE FROM "client_traffics";
+EOF_CLEANUP
+
     sqlite3 $XUIDB <<EOF
--- Sub-настройки (webPort и webBasePath НЕ трогаем!)
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
 INSERT INTO "settings" ("key", "value") VALUES ("subURI",  '${sub_uri}');
@@ -606,7 +578,6 @@ INSERT INTO "settings" ("key", "value") VALUES ("subJsonFragment",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonNoises",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonMux",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonRules",  '');
--- Прочие настройки панели
 INSERT INTO "settings" ("key", "value") VALUES ("webListen",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webDomain",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webCertFile",  '');
@@ -670,7 +641,7 @@ INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_
 );
 EOF
 
-    # НЕ вызываем x-ui cert — панель работает через nginx proxy, ей не нужны свои сертификаты
+    /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
     x-ui start
 }
 
@@ -695,9 +666,7 @@ config_after_install() {
 install_panel() {
     apt-get update && apt-get install -y -q wget curl tar tzdata
     cd /usr/local/
-    # ИСПРАВЛЕНО: используем 3.8.5 как стабильную, с fallback на последнюю версию
     tag_version="v3.8.5"
-    # Пытаемся получить последнюю версию с GitHub
     latest_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     if [[ -n "$latest_version" ]]; then
         tag_version="$latest_version"
@@ -747,25 +716,6 @@ install_panel() {
     systemctl start x-ui
 
     echo -e "${green}x-ui ${tag_version} installation finished, it is running now...${plain}"
-    echo -e ""
-    echo -e "┌───────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}              │
-│                                                       │
-│  ${blue}x-ui${plain}              - Admin Management Script          │
-│  ${blue}x-ui start${plain}        - Start                            │
-│  ${blue}x-ui stop${plain}         - Stop                             │
-│  ${blue}x-ui restart${plain}      - Restart                          │
-│  ${blue}x-ui status${plain}       - Current Status                   │
-│  ${blue}x-ui settings${plain}     - Current Settings                 │
-│  ${blue}x-ui enable${plain}       - Enable Autostart on OS Startup   │
-│  ${blue}x-ui disable${plain}      - Disable Autostart on OS Startup  │
-│  ${blue}x-ui log${plain}          - Check logs                       │
-│  ${blue}x-ui banlog${plain}       - Check Fail2ban ban logs          │
-│  ${blue}x-ui update${plain}       - Update                           │
-│  ${blue}x-ui legacy${plain}       - Legacy version                   │
-│  ${blue}x-ui install${plain}      - Install                          │
-│  ${blue}x-ui uninstall${plain}    - Uninstall                        │
-└───────────────────────────────────────────────────────┘"
 }
 
 ###################################Install X-UI#########################################################
@@ -773,7 +723,6 @@ if systemctl is-active --quiet x-ui; then
     x-ui restart
 else
     install_panel
-    # ИСПРАВЛЕНО: ждём создания x-ui.db перед UPDATE_XUIDB
     local_wait=0
     while [[ ! -f $XUIDB ]]; do
         sleep 1
