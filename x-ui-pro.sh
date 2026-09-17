@@ -278,7 +278,7 @@ server {
     # при проксировании через unix-сокет. Удаление этой строки
     # (как было в v2_x-ui-pro.sh) приводило к потере реального IP
     # в upstream-ах xray и www.
-    set_real_ip_from unix:; #only http
+    # set_real_ip_from unix:; #only http
     listen          443;
     listen         [::]:443;
     proxy_pass      \$sni_name;
