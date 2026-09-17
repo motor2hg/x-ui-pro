@@ -1,6 +1,6 @@
 #!/bin/bash
 #################### x-ui-pro v2.4.3 @ github.com/GFW4Fun ##############################################
-# ИСПРАВЛЕННАЯ ВЕРСИЯ: минимальные правки к оригиналу для совместимости с 3x-ui v3.8.0
+# ФИНАЛЬНАЯ ВЕРСИЯ 3: исправлена 404 подписки, routing правила, xhttp inbound, версия 3.8.5
 ##########################################################################################################
 
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
@@ -77,6 +77,7 @@ json_path=$(gen_random_string 10)
 panel_path=$(gen_random_string 10)
 ws_port=$(make_port)
 trojan_port=$(make_port)
+xhttp_port=$(make_port)
 ws_path=$(gen_random_string 10)
 trojan_path=$(gen_random_string 10)
 xhttp_path=$(gen_random_string 10)
@@ -156,19 +157,21 @@ if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; the
     RealityMainDomain=${reality_domain}
 fi
 
+###############################Install Packages#########################################################
+# ЗАПРОС RU ПРАВИЛ ДО УСТАНОВКИ ПАКЕТОВ
 read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
 RU_RULE="false"
-RU_DOMAIN_BLOCK=''
 
 if [[ "$RU_ROUTING" == "y" || "$RU_ROUTING" == "Y" ]]; then
     RU_RULE="true"
-    RU_DOMAIN_BLOCK=' "ext:geosite_RU.dat:ru-available-only-inside","regexp:.*\\.ru$","regexp:.*\\.su$","geosite:category-ai-ru","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mailru-group","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:t2-ru","geosite:tbank-ru","geosite:tld-ru","geosite:wildberries","geosite:ozon","geosite:yandex"'
+    msg_ok "Russian segment routing rules will be applied!"
+else
+    msg_inf "Russian segment routing rules will NOT be applied."
 fi
 
-###############################Install Packages#########################################################
 if [[ ${INSTALL} == *"y"* ]]; then
     version=$(grep -oP '(?<=VERSION_ID=")[0-9]+' /etc/os-release)
-    if [[ "$version" == "20" || "$version" == "22" ]]; then
+    if [[ "$version" == "20" || "$version" == "22" || "$version" == "24" ]]; then
         echo "Версия системы: Ubuntu $version"
     fi
     $Pak -y update
@@ -363,7 +366,7 @@ location /${sub_path} {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
 location /${sub_path}/ {
@@ -372,7 +375,7 @@ location /${sub_path}/ {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
 location /assets/ {
@@ -381,7 +384,7 @@ location /assets/ {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
 location /assets {
@@ -390,7 +393,7 @@ location /assets {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
 #Subscription Path (json/fragment)
@@ -400,7 +403,7 @@ location /${json_path} {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
 location /${json_path}/ {
@@ -409,10 +412,10 @@ location /${json_path}/ {
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_pass https://127.0.0.1:${sub_port};
+    proxy_pass http://127.0.0.1:${sub_port};
     break;
 }
-#XHTTP - ИСПРАВЛЕНО: используем HTTP-проксирование, не gRPC
+#XHTTP - ИСПРАВЛЕНО: используем HTTP-проксирование, не gRPC (XHTTP это HTTP, не gRPC!)
 location /${xhttp_path} {
     proxy_redirect off;
     proxy_set_header Host \$host;
@@ -543,20 +546,23 @@ UPDATE_XUIDB(){
     trojan_pass=$(gen_random_string 10)
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
 
+    # Формируем полный xrayTemplateConfig с routing правилами
     if [[ "$RU_RULE" == "true" ]]; then
-        ROUTING_JSON='{"domainStrategy":"AsIs","rules":[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["geosite:category-ads-all"],"outboundTag":"blocked","type":"field"},{"domain":['$RU_DOMAIN_BLOCK'],"outboundTag":"direct","type":"field"},{"ip":["ext:geoip_RU.dat:ru","geoip:ru"],"outboundTag":"direct","type":"field"}],"stats":{}}'
+        ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["ads","geosite:category-ads-all","ext:geosite_RU.dat:category-ads-all","ext:geosite_RU.dat:category-ads"],"outboundTag":"blocked","type":"field"},{"domain":["youtube.com","youtu.be","googlevideo.com","geosite:youtube","ext:geosite_RU.dat:youtube","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:tbank-ru","geosite:t2-ru","geosite:tld-ru","geosite:mailru-group","geosite:ozon","geosite:wildberries","geosite:yundaex","geosite:yandex"],"outboundTag":"direct","type":"field"},{"ip":["geoip:ru","ext:geoip_RU.dat:ru","ext:geoip_RU.dat:ru-whitelist"],"outboundTag":"direct","type":"field"},{"domain":["geosite:speedtest"],"outboundTag":"IPv4","type":"field"}]'
     else
-        ROUTING_JSON='{"domainStrategy":"AsIs","rules":[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["geosite:category-ads-all"],"outboundTag":"blocked","type":"field"}],"stats":{}}'
+        ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["geosite:category-ads-all"],"outboundTag":"blocked","type":"field"}]'
     fi
-    echo "$ROUTING_JSON" > /root/routing.json
+
+    # Полный Xray config template (с api inbound, outbounds direct/blocked/IPv4)
+    XRAY_TEMPLATE='{"api":{"services":["HandlerService","LoggerService","StatsService","RoutingService"],"tag":"api"},"inbounds":[{"listen":"127.0.0.1","port":62789,"protocol":"tunnel","settings":{"rewriteAddress":"127.0.0.1"},"tag":"api"}],"log":{"loglevel":"warning"},"outbounds":[{"protocol":"freedom","settings":{},"tag":"direct"},{"protocol":"blackhole","settings":{},"tag":"blocked"},{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"},"tag":"IPv4"},{"protocol":"freedom","settings":{},"tag":"IPv6"},{"protocol":"blackhole","settings":{},"tag":"block"}],"policy":{"levels":{"0":{"statsUserDownlink":true,"statsUserOnline":true,"statsUserUplink":true}},"system":{"statsInboundDownlink":true,"statsInboundUplink":true,"statsOutboundDownlink":false,"statsOutboundUplink":false}},"routing":{"domainStrategy":"AsIs","rules":'$ROUTING_RULES'},"stats":{}}'
 
     sqlite3 $XUIDB <<EOF
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
 INSERT INTO "settings" ("key", "value") VALUES ("subURI",  '${sub_uri}');
-INSERT INTO "settings" ("key", "value") VALUES ("subJsonPath",  '${json_path}');
+INSERT INTO "settings" ("key", "value") VALUES ("subJsonPath",  '/${json_path}/');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonURI",  '${json_uri}');
-INSERT INTO "settings" ("key", "value") VALUES ("subClashEnable",  'false');
+INSERT INTO "settings" ("key", "value") VALUES ("subClashEnable",  'true');
 INSERT INTO "settings" ("key", "value") VALUES ("subEnableRouting",  'false');
 INSERT INTO "settings" ("key", "value") VALUES ("subEnable",  'true');
 INSERT INTO "settings" ("key", "value") VALUES ("webListen",  '');
@@ -591,14 +597,53 @@ INSERT INTO "settings" ("key", "value") VALUES ("subJsonNoises",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonMux",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonRules",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("datepicker",  'gregorian');
+INSERT INTO "settings" ("key", "value") VALUES ("xrayTemplateConfig",  '$XRAY_TEMPLATE');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('1','1','first','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('2','1','first_1','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('3','1','firstX','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('4','1','firstT','0','0','0','0','0');
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} reality','1','0','','8443','vless','{ "clients": [{"id":"${client_id}","flow":"xtls-rprx-vision","email":"first","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network": "tcp","security": "reality","externalProxy":[{"forceTls":"same","dest":"${reality_domain}","port":443,"remark":""}],"realitySettings":{"show":false,"xver":0,"target":"127.0.0.1:9443","serverNames":["$reality_domain"],"privateKey":"${private_key}","minClient":"","maxClient":"","maxTimediff":0,"shortIds":["${shor[0]}","${shor[1]}","${shor[2]}","${shor[3]}","${shor[4]}","${shor[5]}","${shor[6]}","${shor[7]}"],"settings":{"publicKey":"${public_key}","fingerprint":"chrome","serverName":"","spiderX":"/"}},"tcpSettings":{"acceptProxyProtocol":true,"header":{"type":"none"}} }','inbound-8443','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} ws','1','0','','${ws_port}','vless','{ "clients": [{"id":"${client_id2}","flow":"","email":"first_1","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }','inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} xhttp','0','0','/dev/shm/uds2023.sock,0666','0','vless','{ "clients": [{"id":"${client_id3}","flow":"","email":"firstX","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network":"xhttp","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"xhttpSettings":{"path":"/${xhttp_path}","host":"${domain}","headers":{},"scMaxBufferedPosts":30,"scMaxEachPostBytes":"1000000","noSSEHeader":false,"xPaddingBytes":"100-1000","mode":"packet-up"},"sockopt":{"acceptProxyProtocol":false,"tcpFastOpen":true,"mark":0,"tproxy":"off","tcpMptcp":true,"tcpNoDelay":true,"domainStrategy":"UseIP","tcpMaxSeg":1440,"dialerProxy":"","tcpKeepAliveInterval":0,"tcpKeepAliveIdle":300,"tcpUserTimeout":10000,"tcpcongestion":"bbr","V6Only":false,"tcpWindowClamp":600,"interface":""} }','inbound-/dev/shm/uds2023.sock,0666:0|','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} trojan-grpc','1','0','','${trojan_port}','trojan','{ "clients": [{"comment":"","created_at":1756726925000,"email":"firstT","enable":true,"expiryTime":0,"limitIp":0,"password":"${trojan_pass}","reset":0,"subId":"first","tgId":0,"totalGB":0,"updated_at":1756726925000}],"fallbacks":[] }','{ "network":"grpc","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"grpcSettings":{"serviceName":"/${trojan_port}/${trojan_path}","authority":"${domain}","multiMode":false} }','inbound-${trojan_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} reality','1','0','','8443','vless',
+'{
+"clients": [{"id":"${client_id}","flow":"xtls-rprx-vision","email":"first","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{
+"network": "tcp",
+"security": "reality",
+"externalProxy": [{"forceTls":"same","dest":"${reality_domain}","port":443,"remark":""}],
+"realitySettings": {"show": false,"xver":0,"target":"127.0.0.1:9443","serverNames":["$reality_domain"],"privateKey":"${private_key}","minClient":"","maxClient":"","maxTimediff":0,"shortIds":["${shor[0]}","${shor[1]}","${shor[2]}","${shor[3]}","${shor[4]}","${shor[5]}","${shor[6]}","${shor[7]}"],"settings":{"publicKey":"${public_key}","fingerprint":"chrome","serverName":"","spiderX":"/"}},
+"tcpSettings":{"acceptProxyProtocol":true,"header":{"type":"none"}}
+}',
+'inbound-8443','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} ws','1','0','','${ws_port}','vless',
+'{
+"clients": [{"id":"${client_id2}","flow":"","email":"first_1","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }',
+'inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} xhttp','1','0','/dev/shm/uds2023.sock,0666','0','vless',
+'{
+"clients": [{"id":"${client_id3}","flow":"","email":"firstX","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{ "network":"xhttp","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"xhttpSettings":{"path":"/${xhttp_path}","host":"${domain}","headers":{},"scMaxBufferedPosts":30,"scMaxEachPostBytes":"1000000","noSSEHeader":false,"xPaddingBytes":"100-1000","mode":"packet-up"},"sockopt":{"acceptProxyProtocol":false,"tcpFastOpen":true,"mark":0,"tproxy":"off","tcpMptcp":true,"tcpNoDelay":true,"domainStrategy":"UseIP","tcpMaxSeg":1440,"dialerProxy":"","tcpKeepAliveInterval":0,"tcpKeepAliveIdle":300,"tcpUserTimeout":10000,"tcpcongestion":"bbr","V6Only":false,"tcpWindowClamp":600,"interface":""} }',
+'inbound-/dev/shm/uds2023.sock,0666:0|','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} trojan-grpc','1','0','','${trojan_port}','trojan',
+'{
+"clients": [{"comment":"","created_at":1756726925000,"email":"firstT","enable":true,"expiryTime":0,"limitIp":0,"password":"${trojan_pass}","reset":0,"subId":"first","tgId":0,"totalGB":0,"updated_at":1756726925000}],
+"fallbacks":[]
+}',
+'{ "network":"grpc","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"grpcSettings":{"serviceName":"/${trojan_port}/${trojan_path}","authority":"${domain}","multiMode":false} }',
+'inbound-${trojan_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
 EOF
 
     /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
@@ -627,39 +672,77 @@ config_after_install() {
 install_panel() {
     apt-get update && apt-get install -y -q wget curl tar tzdata
     cd /usr/local/
-    tag_version="v3.8.0"
+    # ИСПРАВЛЕНО: используем 3.8.5 как стабильную, с fallback на последнюю версию
+    tag_version="v3.8.5"
+    # Пытаемся получить последнюю версию с GitHub
+    latest_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [[ -n "$latest_version" ]]; then
+        tag_version="$latest_version"
+        msg_inf "Got latest x-ui version: ${tag_version}"
+    else
+        msg_inf "Using fallback version: ${tag_version}"
+    fi
+
     wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
     if [[ $? -ne 0 ]]; then
         echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
         exit 1
     fi
+
     wget -O /usr/bin/x-ui-temp https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh
     if [[ $? -ne 0 ]]; then
         echo -e "${red}Failed to download x-ui.sh${plain}"
         exit 1
     fi
+
     if [[ -e /usr/local/x-ui/ ]]; then
         systemctl stop x-ui
         rm /usr/local/x-ui/ -rf
     fi
+
     tar zxvf x-ui-linux-$(arch).tar.gz
     rm x-ui-linux-$(arch).tar.gz -f
     cd x-ui
     chmod +x x-ui
     chmod +x x-ui.sh
+
     if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
         mv bin/xray-linux-$(arch) bin/xray-linux-arm
         chmod +x bin/xray-linux-arm
     fi
+
     chmod +x x-ui bin/xray-linux-$(arch)
+
     mv -f /usr/bin/x-ui-temp /usr/bin/x-ui
     chmod +x /usr/bin/x-ui
+
     config_after_install
+
     cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
     systemctl daemon-reload
     systemctl enable x-ui
     systemctl start x-ui
+
     echo -e "${green}x-ui ${tag_version} installation finished, it is running now...${plain}"
+    echo -e ""
+    echo -e "┌───────────────────────────────────────────────────────┐
+│  ${blue}x-ui control menu usages (subcommands):${plain}              │
+│                                                       │
+│  ${blue}x-ui${plain}              - Admin Management Script          │
+│  ${blue}x-ui start${plain}        - Start                            │
+│  ${blue}x-ui stop${plain}         - Stop                             │
+│  ${blue}x-ui restart${plain}      - Restart                          │
+│  ${blue}x-ui status${plain}       - Current Status                   │
+│  ${blue}x-ui settings${plain}     - Current Settings                 │
+│  ${blue}x-ui enable${plain}       - Enable Autostart on OS Startup   │
+│  ${blue}x-ui disable${plain}      - Disable Autostart on OS Startup  │
+│  ${blue}x-ui log${plain}          - Check logs                       │
+│  ${blue}x-ui banlog${plain}       - Check Fail2ban ban logs          │
+│  ${blue}x-ui update${plain}       - Update                           │
+│  ${blue}x-ui legacy${plain}       - Legacy version                   │
+│  ${blue}x-ui install${plain}      - Install                          │
+│  ${blue}x-ui uninstall${plain}    - Uninstall                        │
+└───────────────────────────────────────────────────────┘"
 }
 
 ###################################Install X-UI#########################################################
@@ -769,27 +852,6 @@ fi
 
 ##################################Show Details##########################################################
 if systemctl is-active --quiet x-ui; then clear
-    # ИСПРАВЛЕНО: выводим меню только после успешной установки
-    echo -e ""
-    echo -e "┌───────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}              │
-│                                                       │
-│  ${blue}x-ui${plain}              - Admin Management Script          │
-│  ${blue}x-ui start${plain}        - Start                            │
-│  ${blue}x-ui stop${plain}         - Stop                             │
-│  ${blue}x-ui restart${plain}      - Restart                          │
-│  ${blue}x-ui status${plain}       - Current Status                   │
-│  ${blue}x-ui settings${plain}     - Current Settings                 │
-│  ${blue}x-ui enable${plain}       - Enable Autostart on OS Startup   │
-│  ${blue}x-ui disable${plain}      - Disable Autostart on OS Startup  │
-│  ${blue}x-ui log${plain}          - Check logs                       │
-│  ${blue}x-ui banlog${plain}       - Check Fail2ban ban logs          │
-│  ${blue}x-ui update${plain}       - Update                           │
-│  ${blue}x-ui legacy${plain}       - Legacy version                   │
-│  ${blue}x-ui install${plain}      - Install                          │
-│  ${blue}x-ui uninstall${plain}    - Uninstall                        │
-└───────────────────────────────────────────────────────┘"
-    echo ""
     printf '0\n' | x-ui | grep --color=never -i ':'
     msg_inf "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
     nginx -T | grep -i 'ssl_certificate\|ssl_certificate_key'
