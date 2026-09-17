@@ -1,6 +1,6 @@
 #!/bin/bash
-#################### x-ui-pro v2.4.4 @ github.com/motor2hg ##############################################
-# ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ: панель открывается, подписка работает, клиенты создаются
+#################### x-ui-pro v2.4.5 @ github.com/motor2hg ##############################################
+# ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ: панель открывается, подписка работает, клиенты создаются, RU правила применяются
 ##########################################################################################################
 
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
@@ -158,6 +158,7 @@ if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; the
 fi
 
 ###############################Install Packages#########################################################
+# ЗАПРОС RU ПРАВИЛ (только один раз в начале!)
 read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
 RU_RULE="false"
 
@@ -537,9 +538,9 @@ UPDATE_XUIDB(){
 
     x-ui stop
 
-    # ИСПРАВЛЕНО #1: Удаляем дубликаты в settings (оставляем только последнюю запись для каждого key)
-    # Без этого при повторном запуске или после x-ui setting появляются дубли,
-    # и x-ui при SELECT берёт первое (устаревшее) значение → 404 на подписке
+    # ИСПРАВЛЕНО #1: Удаляем дубликаты в settings (ГЛАВНОЕ ИСПРАВЛЕНИЕ!)
+    # Без этого в БД появляются несколько записей с одинаковым key,
+    # x-ui берёт первое значение, а nginx настроен на последнее → 404
     sqlite3 $XUIDB <<'EOF_DEDUP'
 DELETE FROM "settings" WHERE rowid NOT IN (
     SELECT MAX(rowid) FROM "settings" GROUP BY "key"
@@ -547,16 +548,6 @@ DELETE FROM "settings" WHERE rowid NOT IN (
 DELETE FROM "inbounds";
 DELETE FROM "client_traffics";
 EOF_DEDUP
-
-    # Запрос RU правил маршрутизации
-    read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
-    RU_RULE="false"
-    if [[ "$RU_ROUTING" == "y" || "$RU_ROUTING" == "Y" ]]; then
-        RU_RULE="true"
-        msg_ok "Russian segment routing rules will be applied!"
-    else
-        msg_inf "Russian segment routing rules will NOT be applied."
-    fi
 
     output=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
     private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
@@ -576,11 +567,7 @@ EOF_DEDUP
 
     XRAY_TEMPLATE='{"api":{"services":["HandlerService","LoggerService","StatsService","RoutingService"],"tag":"api"},"inbounds":[{"listen":"127.0.0.1","port":62789,"protocol":"tunnel","settings":{"rewriteAddress":"127.0.0.1"},"tag":"api"}],"log":{"loglevel":"warning"},"outbounds":[{"protocol":"freedom","settings":{},"tag":"direct"},{"protocol":"blackhole","settings":{},"tag":"blocked"},{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"},"tag":"IPv4"},{"protocol":"freedom","settings":{},"tag":"IPv6"},{"protocol":"blackhole","settings":{},"tag":"block"}],"policy":{"levels":{"0":{"statsUserDownlink":true,"statsUserOnline":true,"statsUserUplink":true}},"system":{"statsInboundDownlink":true,"statsInboundUplink":true,"statsOutboundDownlink":false,"statsOutboundUplink":false}},"routing":{"domainStrategy":"AsIs","rules":'$ROUTING_RULES'},"stats":{}}'
 
-    # ИСПРАВЛЕНО #3: webBasePath вставляем СО СЛЭШАМИ (/path/)
-    # x-ui setting автоматически добавляет слэши, и если мы пишем без них,
-    # возникает несоответствие между nginx (ищет /path/) и БД (хранит path) → 404
-    # ИСПРАВЛЕНО #4: Вставляем webPort явно через sqlite3
-    # ИСПРАВЛЕНО #5: Вставляем xrayTemplateConfig с RU-правилами
+    # ИСПРАВЛЕНО #3: webBasePath СО СЛЭШАМИ (/path/) - как ожидает x-ui
     sqlite3 $XUIDB <<EOF
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
@@ -620,7 +607,7 @@ INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('3','1','firstX','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('4','1','firstT','0','0','0','0','0');
 
--- ИСПРАВЛЕНО #6: Все sniffing.enabled: true (было false у reality/ws/trojan)
+-- ИСПРАВЛЕНО #4: Все sniffing.enabled: true
 INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
 '1','0','0','0','${emoji_flag} reality','1','0','','8443','vless',
 '{
@@ -645,7 +632,7 @@ INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_
 '{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }',
 'inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
 );
--- ИСПРАВЛЕНО #7: xhttp enable=1 (было 0 - inbound был отключён!)
+-- ИСПРАВЛЕНО #5: xhttp enable=1 (было 0)
 INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
 '1','0','0','0','${emoji_flag} xhttp','1','0','/dev/shm/uds2023.sock,0666','0','vless',
 '{
@@ -666,10 +653,20 @@ INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_
 );
 EOF
 
-    # ИСПРАВЛЕНО #8: НЕ вызываем x-ui cert - панель работает на HTTP через nginx proxy
+    # ИСПРАВЛЕНО #6: НЕ вызываем x-ui cert - панель работает через nginx на HTTP
     /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
     
-    x-ui start
+    # ИСПРАВЛЕНО #7: Запускаем через systemctl, чтобы избежать повторной миграции
+    systemctl start x-ui
+    sleep 5
+    
+    # Проверка что клиенты создались
+    CLIENT_COUNT=$(sqlite3 $XUIDB "SELECT COUNT(*) FROM inbounds;")
+    if [[ "$CLIENT_COUNT" -lt 4 ]]; then
+        msg_err "Clients not created! Count: $CLIENT_COUNT"
+    else
+        msg_ok "✓ $CLIENT_COUNT clients created successfully"
+    fi
 }
 
 arch() {
@@ -687,7 +684,8 @@ arch() {
 
 config_after_install() {
     /usr/local/x-ui/x-ui setting -username "asdfasdf" -password "asdfasdf" -port "2096" -webBasePath "asdfasdf"
-    /usr/local/x-ui/x-ui migrate
+    # ИСПРАВЛЕНО #8: НЕ вызываем x-ui migrate - он удаляет наши данные!
+    # /usr/local/x-ui/x-ui migrate
 }
 
 install_panel() {
@@ -763,7 +761,7 @@ else
     if ! systemctl is-enabled --quiet x-ui; then
         systemctl daemon-reload && systemctl enable x-ui.service
     fi
-    x-ui restart
+    # ИСПРАВЛЕНО #9: НЕ делаем x-ui restart - он уже запущен в UPDATE_XUIDB
 fi
 
 ######################enable bbr and tune system########################################################
