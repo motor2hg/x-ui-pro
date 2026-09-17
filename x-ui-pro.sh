@@ -645,11 +645,11 @@ EOF
 
     # Вставка связей клиент ↔ inbound
     sqlite3 $XUIDB <<EOF
-INSERT INTO "client_inbounds" ("client_id", "inbound_id") VALUES 
-(1, 1),
-(2, 2),
-(3, 3),
-(4, 4);
+INSERT INTO "client_inbounds" ("client_id", "inbound_id", "flow_override", "created_at") VALUES 
+(1, 1, 'xtls-rprx-vision', ${timestamp}),
+(2, 2, '', ${timestamp}),
+(3, 3, '', ${timestamp}),
+(4, 4, '', ${timestamp});
 EOF
 
     # Вставка статистики трафика
