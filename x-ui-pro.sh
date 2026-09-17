@@ -536,6 +536,28 @@ UPDATE_XUIDB(){
     sleep 3
 
     x-ui stop
+
+    # ИСПРАВЛЕНО #1: Удаляем дубликаты в settings (оставляем только последнюю запись для каждого key)
+    # Без этого при повторном запуске или после x-ui setting появляются дубли,
+    # и x-ui при SELECT берёт первое (устаревшее) значение → 404 на подписке
+    sqlite3 $XUIDB <<'EOF_DEDUP'
+DELETE FROM "settings" WHERE rowid NOT IN (
+    SELECT MAX(rowid) FROM "settings" GROUP BY "key"
+);
+DELETE FROM "inbounds";
+DELETE FROM "client_traffics";
+EOF_DEDUP
+
+    # Запрос RU правил маршрутизации
+    read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
+    RU_RULE="false"
+    if [[ "$RU_ROUTING" == "y" || "$RU_ROUTING" == "Y" ]]; then
+        RU_RULE="true"
+        msg_ok "Russian segment routing rules will be applied!"
+    else
+        msg_inf "Russian segment routing rules will NOT be applied."
+    fi
+
     output=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
     private_key=$(echo "$output" | grep "^PrivateKey:" | awk '{print $2}')
     public_key=$(echo "$output" | grep "^Password" | awk '{print $3}')
@@ -545,7 +567,7 @@ UPDATE_XUIDB(){
     trojan_pass=$(gen_random_string 10)
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
 
-    # Формируем routing правила
+    # ИСПРАВЛЕНО #2: Формируем routing правила с учётом выбора RU-сегмента
     if [[ "$RU_RULE" == "true" ]]; then
         ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["ads","geosite:category-ads-all","ext:geosite_RU.dat:category-ads-all","ext:geosite_RU.dat:category-ads"],"outboundTag":"blocked","type":"field"},{"domain":["youtube.com","youtu.be","googlevideo.com","geosite:youtube","ext:geosite_RU.dat:youtube","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:tbank-ru","geosite:t2-ru","geosite:tld-ru","geosite:mailru-group","geosite:ozon","geosite:wildberries","geosite:yundaex","geosite:yandex"],"outboundTag":"direct","type":"field"},{"ip":["geoip:ru","ext:geoip_RU.dat:ru","ext:geoip_RU.dat:ru-whitelist"],"outboundTag":"direct","type":"field"},{"domain":["geosite:speedtest"],"outboundTag":"IPv4","type":"field"}]'
     else
@@ -554,12 +576,11 @@ UPDATE_XUIDB(){
 
     XRAY_TEMPLATE='{"api":{"services":["HandlerService","LoggerService","StatsService","RoutingService"],"tag":"api"},"inbounds":[{"listen":"127.0.0.1","port":62789,"protocol":"tunnel","settings":{"rewriteAddress":"127.0.0.1"},"tag":"api"}],"log":{"loglevel":"warning"},"outbounds":[{"protocol":"freedom","settings":{},"tag":"direct"},{"protocol":"blackhole","settings":{},"tag":"blocked"},{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"},"tag":"IPv4"},{"protocol":"freedom","settings":{},"tag":"IPv6"},{"protocol":"blackhole","settings":{},"tag":"block"}],"policy":{"levels":{"0":{"statsUserDownlink":true,"statsUserOnline":true,"statsUserUplink":true}},"system":{"statsInboundDownlink":true,"statsInboundUplink":true,"statsOutboundDownlink":false,"statsOutboundUplink":false}},"routing":{"domainStrategy":"AsIs","rules":'$ROUTING_RULES'},"stats":{}}'
 
-    # ИСПРАВЛЕНО: удаляем только inbounds и client_traffics (НЕ трогаем settings!)
-    sqlite3 $XUIDB <<'EOF_CLEANUP'
-DELETE FROM "inbounds";
-DELETE FROM "client_traffics";
-EOF_CLEANUP
-
+    # ИСПРАВЛЕНО #3: webBasePath вставляем СО СЛЭШАМИ (/path/)
+    # x-ui setting автоматически добавляет слэши, и если мы пишем без них,
+    # возникает несоответствие между nginx (ищет /path/) и БД (хранит path) → 404
+    # ИСПРАВЛЕНО #4: Вставляем webPort явно через sqlite3
+    # ИСПРАВЛЕНО #5: Вставляем xrayTemplateConfig с RU-правилами
     sqlite3 $XUIDB <<EOF
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
@@ -582,6 +603,8 @@ INSERT INTO "settings" ("key", "value") VALUES ("webListen",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webDomain",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webCertFile",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webKeyFile",  '');
+INSERT INTO "settings" ("key", "value") VALUES ("webPort",  '${panel_port}');
+INSERT INTO "settings" ("key", "value") VALUES ("webBasePath",  '/${panel_path}/');
 INSERT INTO "settings" ("key", "value") VALUES ("sessionMaxAge",  '60');
 INSERT INTO "settings" ("key", "value") VALUES ("pageSize",  '50');
 INSERT INTO "settings" ("key", "value") VALUES ("expireDiff",  '0');
@@ -597,6 +620,7 @@ INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('3','1','firstX','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('4','1','firstT','0','0','0','0','0');
 
+-- ИСПРАВЛЕНО #6: Все sniffing.enabled: true (было false у reality/ws/trojan)
 INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
 '1','0','0','0','${emoji_flag} reality','1','0','','8443','vless',
 '{
@@ -621,6 +645,7 @@ INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_
 '{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }',
 'inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
 );
+-- ИСПРАВЛЕНО #7: xhttp enable=1 (было 0 - inbound был отключён!)
 INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
 '1','0','0','0','${emoji_flag} xhttp','1','0','/dev/shm/uds2023.sock,0666','0','vless',
 '{
@@ -641,7 +666,9 @@ INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_
 );
 EOF
 
+    # ИСПРАВЛЕНО #8: НЕ вызываем x-ui cert - панель работает на HTTP через nginx proxy
     /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
+    
     x-ui start
 }
 
