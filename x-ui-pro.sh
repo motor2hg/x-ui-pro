@@ -1,8 +1,6 @@
 #!/bin/bash
 #################### x-ui-pro v2.4.3 @ github.com/GFW4Fun ##############################################
-# ФИНАЛЬНАЯ ВЕРСИЯ: собрана на базе оригинала mozaroc/x-ui-pro с минимальными правками
-# для совместимости с 3x-ui v3.8.0. Все оригинальные комментарии и структура сохранены.
-# Все изменения помечены комментарием "# ИСПРАВЛЕНО:" или "# ДОБАВЛЕНО:".
+# ИСПРАВЛЕННАЯ ВЕРСИЯ: минимальные правки к оригиналу для совместимости с 3x-ui v3.8.0
 ##########################################################################################################
 
 [[ $EUID -ne 0 ]] && echo "not root!" && sudo su -
@@ -28,9 +26,6 @@ CLASH=0
 CUSTOMWEBSUB=0
 Pak=$(type apt &>/dev/null && echo "apt" || echo "yum")
 
-# ДОБАВЛЕНО: функция ensure_ufw для надёжной работы с фаерволом.
-# В некоторых минимальных образах Ubuntu/Debian ufw отсутствует,
-# и последующие вызовы "ufw allow 22/tcp" падали с ошибкой.
 ensure_ufw() {
     if ! command -v ufw >/dev/null 2>&1; then
         $Pak -y install ufw >/dev/null 2>&1
@@ -121,15 +116,12 @@ if [[ ${UNINSTALL} == *"y"* ]]; then
     clear && msg_ok "Completely Uninstalled!" && exit 1
 fi
 
-# --- get public IPv4 early (for auto-domain mode)
 IP4_REGEX="^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"
 IP4=$(ip route get 8.8.8.8 2>&1 | grep -Po -- 'src \K\S*')
 [[ $IP4 =~ $IP4_REGEX ]] || IP4=$(curl -s ipv4.icanhazip.com | tr -d '[:space:]')
 
 if [[ ${AUTODOMAIN} == *"y"* ]]; then
-    # panel domain: x.x.x.x.cdn-one.org
     domain="${IP4}.cdn-one.org"
-    # reality domain: x-x-x-x.cdn-one.org
     reality_domain="${IP4//./-}.cdn-one.org"
 fi
 
@@ -164,22 +156,16 @@ if [[ "${RealitySubDomain}.${RealityMainDomain}" != "${reality_domain}" ]] ; the
     RealityMainDomain=${reality_domain}
 fi
 
-###############################Install Packages#########################################################
-# ДОБАВЛЕНО: опциональный запрос про RU-маршрутизацию.
-# Ответ сохраняется в переменную RU_RULE и используется ниже
-# при формировании JSON-а маршрутизации в UPDATE_XUIDB.
 read -p "Add Russian segment routing rules? y/n: " RU_ROUTING
 RU_RULE="false"
 RU_DOMAIN_BLOCK=''
 
 if [[ "$RU_ROUTING" == "y" || "$RU_ROUTING" == "Y" ]]; then
     RU_RULE="true"
-    # Список RU-доменов для прямого (direct) маршрута.
-    # Это нужно, чтобы трафик к российским ресурсам шёл напрямую,
-    # а не через туннель, и сайты типа wildberries.ru/ozon.ru открывались нормально.
     RU_DOMAIN_BLOCK=' "ext:geosite_RU.dat:ru-available-only-inside","regexp:.*\\.ru$","regexp:.*\\.su$","geosite:category-ai-ru","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mailru-group","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:t2-ru","geosite:tbank-ru","geosite:tld-ru","geosite:wildberries","geosite:ozon","geosite:yandex"'
 fi
 
+###############################Install Packages#########################################################
 if [[ ${INSTALL} == *"y"* ]]; then
     version=$(grep -oP '(?<=VERSION_ID=")[0-9]+' /etc/os-release)
     if [[ "$version" == "20" || "$version" == "22" ]]; then
@@ -188,8 +174,6 @@ if [[ ${INSTALL} == *"y"* ]]; then
     $Pak -y update
     $Pak -y install curl wget jq bash sudo nginx-full certbot python3-certbot-nginx sqlite3 ufw
     systemctl daemon-reload && systemctl enable --now nginx
-    # ИСПРАВЛЕНО: вызываем ensure_ufw после установки пакетов,
-    # чтобы гарантировать, что ufw точно доступен и отключён перед certbot.
     ensure_ufw
 fi
 
@@ -207,7 +191,6 @@ IP6=$(ip route get 2620:fe::fe 2>&1 | grep -Po -- 'src \K\S*')
 ##############################Install SSL###############################################################
 resolve_to_ip () {
     local host="$1"
-    # get first A-record
     local a
     a=$(getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1{print $1}')
     [[ -n "$a" ]] && [[ "$a" == "$IP4" ]]
@@ -273,12 +256,7 @@ upstream www {
 }
 server {
     proxy_protocol on;
-    # ОРИГИНАЛ: set_real_ip_from unix:;
-    # Эта строка нужна для корректной передачи реального IP клиента
-    # при проксировании через unix-сокет. Удаление этой строки
-    # (как было в v2_x-ui-pro.sh) приводило к потере реального IP
-    # в upstream-ах xray и www.
-    # set_real_ip_from unix:; #only http
+    #set_real_ip_from unix:; #onle http
     listen          443;
     listen         [::]:443;
     proxy_pass      \$sni_name;
@@ -288,13 +266,7 @@ EOF
 
 grep -xqFR "stream { include /etc/nginx/stream-enabled/*.conf; }" /etc/nginx/* ||echo "stream { include /etc/nginx/stream-enabled/*.conf; }" >> /etc/nginx/nginx.conf
 grep -xqFR "load_module modules/ngx_stream_module.so;" /etc/nginx/* || sed -i '1s/^/load_module \/usr\/lib\/nginx\/modules\/ngx_stream_module.so; /' /etc/nginx/nginx.conf
-
-# ОРИГИНАЛ: загрузка модуля ngx_stream_geoip2_module
-# В v3_x-ui-pro.sh эта строка была удалена, из-за чего при наличии
-# geoip-правил в xray/nginx конфиг мог падать с ошибкой.
-# Возвращаю оригинальную строку — она harmless, если модуль есть.
 grep -xqFR "load_module modules/ngx_stream_geoip2_module.so;" /etc/nginx* || sed -i '2s/^/load_module \/usr\/lib\/nginx\/modules\/ngx_stream_geoip2_module.so; /' /etc/nginx/nginx.conf
-
 grep -xqFR "worker_rlimit_nofile 16384;" /etc/nginx/* ||echo "worker_rlimit_nofile 16384;" >> /etc/nginx/nginx.conf
 sed -i "/worker_connections/c\worker_connections 4096;" /etc/nginx/nginx.conf
 
@@ -440,20 +412,16 @@ location /${json_path}/ {
     proxy_pass https://127.0.0.1:${sub_port};
     break;
 }
-#XHTTP
-# ИСПРАВЛЕНО: в LLM-версиях здесь был "grpc_pass grpc://unix:/dev/shm/uds2023.sock".
-# Это было ошибкой: XHTTP в Xray работает поверх HTTP/2 (не gRPC),
-# и nginx при попытке говорить по gRPC получал "use of closed network connection".
-# Возвращаем оригинальный "proxy_pass http://unix:/dev/shm/uds2023.sock".
+#XHTTP - ИСПРАВЛЕНО: используем HTTP-проксирование, не gRPC
 location /${xhttp_path} {
-    proxy_pass http://unix:/dev/shm/uds2023.sock;
+    proxy_redirect off;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
     proxy_http_version 1.1;
-    proxy_set_header Connection         "";
-    proxy_set_header X-Forwarded-For    \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto  \$scheme;
-    proxy_set_header X-Forwarded-Port   \$server_port;
-    proxy_set_header Host               \$host;
-    proxy_set_header X-Forwarded-Host   \$host;
+    proxy_set_header Connection "";
+    proxy_pass http://unix:/dev/shm/uds2023.sock;
 }
 #Xray Config Path
 location ~ ^/(?<fwdport>\d+)/(?<fwdpath>.*)\$ {
@@ -554,11 +522,7 @@ shor=($(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(ope
 
 ########################################Update X-UI Port/Path for first INSTALL#########################
 UPDATE_XUIDB(){
-    # ИСПРАВЛЕНО: ждём появления x-ui.db до 30 секунд.
-    # install_panel запускает "systemctl start x-ui", но сервису
-    # нужно время, чтобы создать x-ui.db. Без этого ожидания
-    # sqlite3 ниже падал с ошибкой "no such table", клиенты не создавались,
-    # а nginx проксировал на несуществующие порты → 502.
+    # ИСПРАВЛЕНО: ждём создания x-ui.db до 30 секунд
     local wait_count=0
     while [[ ! -f $XUIDB ]]; do
         sleep 1
@@ -567,7 +531,6 @@ UPDATE_XUIDB(){
             msg_err "x-ui.db file not exist after 30s! Maybe x-ui isn't installed." && exit 1
         fi
     done
-    # Дополнительная пауза, чтобы x-ui успел выполнить миграции БД.
     sleep 3
 
     x-ui stop
@@ -580,7 +543,6 @@ UPDATE_XUIDB(){
     trojan_pass=$(gen_random_string 10)
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
 
-    # Формируем JSON маршрутизации с учётом выбора RU-сегмента.
     if [[ "$RU_RULE" == "true" ]]; then
         ROUTING_JSON='{"domainStrategy":"AsIs","rules":[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["geosite:category-ads-all"],"outboundTag":"blocked","type":"field"},{"domain":['$RU_DOMAIN_BLOCK'],"outboundTag":"direct","type":"field"},{"ip":["ext:geoip_RU.dat:ru","geoip:ru"],"outboundTag":"direct","type":"field"}],"stats":{}}'
     else
@@ -588,11 +550,6 @@ UPDATE_XUIDB(){
     fi
     echo "$ROUTING_JSON" > /root/routing.json
 
-    # ИСПРАВЛЕНО: возвращаем оригинальные INSERT INTO "inbounds" БЕЗ фиксированного "id".
-    # SQLite сам назначит id=1,2,3,4 по порядку вставки.
-    # Это сохраняет связку с client_traffics (у которых inbound_id=1,2,3,4).
-    # В Hermes-версии было "INSERT OR REPLACE INTO inbounds ("id",...) VALUES (1,...)" —
-    # это приводило к затиранию клиентов при повторном запуске.
     sqlite3 $XUIDB <<EOF
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
@@ -638,304 +595,10 @@ INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('2','1','first_1','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('3','1','firstX','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('4','1','firstT','0','0','0','0','0');
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
-'1',
-'0',
-'0',
-'0',
-'${emoji_flag} reality',
-'1',             '0',
-'',
-'8443',
-'vless',
-'{
-"clients": [
-{
-"id": "${client_id}",
-"flow": "xtls-rprx-vision",
-"email": "first",
-"limitIp": 0,
-"totalGB": 0,
-"expiryTime": 0,
-"enable": true,
-# ИСПРАВЛЕНО: в оригинале было "tgId": "", что в 3x-ui 3.8.0
-# ломало миграцию (поле ожидает integer). Меняем на 0.
-"tgId": 0,
-"subId": "first",
-"reset": 0,
-"created_at": 1756726925000,
-"updated_at": 1756726925000
-}
-],
-"decryption": "none",
-"fallbacks": []
-}',
-'{
-"network": "tcp",
-"security": "reality",
-"externalProxy": [
-{
-"forceTls": "same",
-"dest": "${domain}",
-"port": 443,
-"remark": ""
-}
-],
-"realitySettings": {
-"show": false,
-"xver": 0,
-"target": "127.0.0.1:9443",
-"serverNames": [
-"$reality_domain"
-],
-"privateKey": "${private_key}",
-"minClient": "",
-"maxClient": "",
-"maxTimediff": 0,
-"shortIds": [
-"${shor[0]}",
-"${shor[1]}",
-"${shor[2]}",
-"${shor[3]}",
-"${shor[4]}",
-"${shor[5]}",
-"${shor[6]}",
-"${shor[7]}"
-],
-"settings": {
-"publicKey": "${public_key}",
-"fingerprint": "chrome",
-"serverName": "",
-"spiderX": "/"
-}
-},
-"tcpSettings": {
-"acceptProxyProtocol": true,
-"header": {
-"type": "none"
-}
-}
-}',
-'inbound-8443',
-# ИСПРАВЛЕНО: в оригинале у REALITY было "enabled": false.
-# Это приводило к тому, что sniffing не определял домен,
-# и fallback на 9443 (reality_domain) работал нестабильно.
-# Ставим "enabled": true.
-'{
-"enabled": true,
-"destOverride": [
-"http",
-"tls",
-"quic",
-"fakedns"
-],
-"metadataOnly": false,
-"routeOnly": false
-}'
-);
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
-'1',
-'0',
-'0',
-'0',
-'${emoji_flag} ws',
-'1',
-'0',
-'',
-'${ws_port}',
-'vless',
-'{
-"clients": [
-{
-"id": "${client_id2}",
-"flow": "",
-"email": "first_1",
-"limitIp": 0,
-"totalGB": 0,
-"expiryTime": 0,
-"enable": true,
-"tgId": 0,
-"subId": "first",
-"reset": 0,
-"created_at": 1756726925000,
-"updated_at": 1756726925000
-}
-],
-"decryption": "none",
-"fallbacks": []
-}', '{
-"network": "ws",
-"security": "none",
-"externalProxy": [
-{
-"forceTls": "tls",
-"dest": "${domain}",
-"port": 443,
-"remark": ""
-}
-],
-"wsSettings": {
-"acceptProxyProtocol": false,
-"path": "/${ws_port}/${ws_path}",
-"host": "${domain}",
-"headers": {}
-}
-}',
-'inbound-${ws_port}',
-'{
-"enabled": true,
-"destOverride": [
-"http",
-"tls",
-"quic",
-"fakedns"
-],
-"metadataOnly": false,
-"routeOnly": false
-}'
-);
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
-'1',
-'0',
-'0',
-'0',
-'${emoji_flag} xhttp',
-'0',
-'0',
-'/dev/shm/uds2023.sock,0666',
-'0',
-'vless',
-'{
-"clients": [
-{
-"id": "${client_id3}",
-"flow": "",
-"email": "firstX",
-"limitIp": 0,
-"totalGB": 0,
-"expiryTime": 0,
-"enable": true,
-"tgId": 0,
-"subId": "first",
-"reset": 0,
-"created_at": 1756726925000,
-"updated_at": 1756726925000
-}
-],
-"decryption": "none",
-"fallbacks": []
-}', '{
-"network": "xhttp",
-"security": "none",
-"externalProxy": [
-{
-"forceTls": "tls",
-"dest": "${domain}",
-"port": 443,
-"remark": ""
-}
-],
-"xhttpSettings": {
-"path": "/${xhttp_path}",
-"host": "${domain}",
-"headers": {},
-"scMaxBufferedPosts": 30,
-"scMaxEachPostBytes": "1000000",
-"noSSEHeader": false,
-"xPaddingBytes": "100-1000",
-"mode": "packet-up"
-},
-"sockopt": {
-"acceptProxyProtocol": false,
-"tcpFastOpen": true,
-"mark": 0,
-"tproxy": "off",
-"tcpMptcp": true,
-"tcpNoDelay": true,
-"domainStrategy": "UseIP",
-"tcpMaxSeg": 1440,
-"dialerProxy": "",
-"tcpKeepAliveInterval": 0,
-"tcpKeepAliveIdle": 300,
-"tcpUserTimeout": 10000,
-"tcpcongestion": "bbr",
-"V6Only": false,
-"tcpWindowClamp": 600,
-"interface": ""
-}
-}',
-'inbound-/dev/shm/uds2023.sock,0666:0|',
-'{
-"enabled": true,
-"destOverride": [
-"http",
-"tls",
-"quic",
-"fakedns"
-],
-"metadataOnly": false,
-"routeOnly": false
-}'
-);
-INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
-'1',
-'0',
-'0',
-'0',
-'${emoji_flag} trojan-grpc',
-'1',
-'0',
-'',
-'${trojan_port}',
-'trojan',
-'{
-"clients": [
-{
-"comment": "",
-"created_at": 1756726925000,
-"email": "firstT",
-"enable": true,
-"expiryTime": 0,
-"limitIp": 0,
-"password": "${trojan_pass}",
-"reset": 0,
-"subId": "first",
-"tgId": 0,
-"totalGB": 0,
-"updated_at": 1756726925000
-}
-],
-"fallbacks": []
-}', '{
-"network": "grpc",
-"security": "none",
-"externalProxy": [
-{
-"forceTls": "tls",
-"dest": "${domain}",
-"port": 443,
-"remark": ""
-}
-],
-"grpcSettings": {
-"serviceName": "/${trojan_port}/${trojan_path}",
-"authority": "${domain}",
-"multiMode": false
-}
-}',
-'inbound-${trojan_port}',
-'{
-"enabled": true,
-"destOverride": [
-"http",
-"tls",
-"quic",
-"fakedns"
-],
-"metadataOnly": false,
-"routeOnly": false
-}'
-);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} reality','1','0','','8443','vless','{ "clients": [{"id":"${client_id}","flow":"xtls-rprx-vision","email":"first","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network": "tcp","security": "reality","externalProxy":[{"forceTls":"same","dest":"${reality_domain}","port":443,"remark":""}],"realitySettings":{"show":false,"xver":0,"target":"127.0.0.1:9443","serverNames":["$reality_domain"],"privateKey":"${private_key}","minClient":"","maxClient":"","maxTimediff":0,"shortIds":["${shor[0]}","${shor[1]}","${shor[2]}","${shor[3]}","${shor[4]}","${shor[5]}","${shor[6]}","${shor[7]}"],"settings":{"publicKey":"${public_key}","fingerprint":"chrome","serverName":"","spiderX":"/"}},"tcpSettings":{"acceptProxyProtocol":true,"header":{"type":"none"}} }','inbound-8443','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} ws','1','0','','${ws_port}','vless','{ "clients": [{"id":"${client_id2}","flow":"","email":"first_1","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }','inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} xhttp','0','0','/dev/shm/uds2023.sock,0666','0','vless','{ "clients": [{"id":"${client_id3}","flow":"","email":"firstX","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],"decryption":"none","fallbacks":[] }','{ "network":"xhttp","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"xhttpSettings":{"path":"/${xhttp_path}","host":"${domain}","headers":{},"scMaxBufferedPosts":30,"scMaxEachPostBytes":"1000000","noSSEHeader":false,"xPaddingBytes":"100-1000","mode":"packet-up"},"sockopt":{"acceptProxyProtocol":false,"tcpFastOpen":true,"mark":0,"tproxy":"off","tcpMptcp":true,"tcpNoDelay":true,"domainStrategy":"UseIP","tcpMaxSeg":1440,"dialerProxy":"","tcpKeepAliveInterval":0,"tcpKeepAliveIdle":300,"tcpUserTimeout":10000,"tcpcongestion":"bbr","V6Only":false,"tcpWindowClamp":600,"interface":""} }','inbound-/dev/shm/uds2023.sock,0666:0|','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES ('1','0','0','0','${emoji_flag} trojan-grpc','1','0','','${trojan_port}','trojan','{ "clients": [{"comment":"","created_at":1756726925000,"email":"firstT","enable":true,"expiryTime":0,"limitIp":0,"password":"${trojan_pass}","reset":0,"subId":"first","tgId":0,"totalGB":0,"updated_at":1756726925000}],"fallbacks":[] }','{ "network":"grpc","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"grpcSettings":{"serviceName":"/${trojan_port}/${trojan_path}","authority":"${domain}","multiMode":false} }','inbound-${trojan_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }');
 EOF
 
     /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
@@ -964,100 +627,39 @@ config_after_install() {
 install_panel() {
     apt-get update && apt-get install -y -q wget curl tar tzdata
     cd /usr/local/
-    # Download resources
-    # ИСПРАВЛЕНО: фиксируем tag_version=v3.8.0.
-    # В оригинале скрипт парсил GitHub API, но это ломалось
-    # при ограничениях API и при отсутствии IPv4.
-    # Также мы гарантируем совместимость с форматом БД 3.8.0.
     tag_version="v3.8.0"
-    if [ $# == 0 ]; then
-        echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
-            exit 1
-        fi
-    else
-        tag_version=$1
-        tag_version_numeric=${tag_version#v}
-        min_version="2.3.5"
-        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
-            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
-            exit 1
-        fi
-        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning to install x-ui $1"
-        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
-            exit 1
-        fi
+    wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+    if [[ $? -ne 0 ]]; then
+        echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
+        exit 1
     fi
     wget -O /usr/bin/x-ui-temp https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh
     if [[ $? -ne 0 ]]; then
         echo -e "${red}Failed to download x-ui.sh${plain}"
         exit 1
     fi
-    # Stop x-ui service and remove old resources
     if [[ -e /usr/local/x-ui/ ]]; then
-        if [[ $release == "alpine" ]]; then
-            rc-service x-ui stop
-        else
-            systemctl stop x-ui
-        fi
+        systemctl stop x-ui
         rm /usr/local/x-ui/ -rf
     fi
-    # Extract resources and set permissions
     tar zxvf x-ui-linux-$(arch).tar.gz
     rm x-ui-linux-$(arch).tar.gz -f
     cd x-ui
     chmod +x x-ui
     chmod +x x-ui.sh
-    # Check the system's architecture and rename the file accordingly
     if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
         mv bin/xray-linux-$(arch) bin/xray-linux-arm
         chmod +x bin/xray-linux-arm
     fi
     chmod +x x-ui bin/xray-linux-$(arch)
-    # Update x-ui cli and set permission
     mv -f /usr/bin/x-ui-temp /usr/bin/x-ui
     chmod +x /usr/bin/x-ui
     config_after_install
-    if [[ $release == "alpine" ]]; then
-        wget --inet4-only -O /etc/init.d/x-ui https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.rc
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Failed to download x-ui.rc${plain}"
-            exit 1
-        fi
-        chmod +x /etc/init.d/x-ui
-        rc-update add x-ui
-        rc-service x-ui start
-    else
-        cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
-        systemctl daemon-reload
-        systemctl enable x-ui
-        systemctl start x-ui
-    fi
+    cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
+    systemctl daemon-reload
+    systemctl enable x-ui
+    systemctl start x-ui
     echo -e "${green}x-ui ${tag_version} installation finished, it is running now...${plain}"
-    echo -e ""
-    echo -e "┌───────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}              │
-│                                                       │
-│  ${blue}x-ui${plain}              - Admin Management Script          │
-│  ${blue}x-ui start${plain}        - Start                            │
-│  ${blue}x-ui stop${plain}         - Stop                             │
-│  ${blue}x-ui restart${plain}      - Restart                          │
-│  ${blue}x-ui status${plain}       - Current Status                   │
-│  ${blue}x-ui settings${plain}     - Current Settings                 │
-│  ${blue}x-ui enable${plain}       - Enable Autostart on OS Startup   │
-│  ${blue}x-ui disable${plain}      - Disable Autostart on OS Startup  │
-│  ${blue}x-ui log${plain}          - Check logs                       │
-│  ${blue}x-ui banlog${plain}       - Check Fail2ban ban logs          │
-│  ${blue}x-ui update${plain}       - Update                           │
-│  ${blue}x-ui legacy${plain}       - Legacy version                   │
-│  ${blue}x-ui install${plain}      - Install                          │
-│  ${blue}x-ui uninstall${plain}    - Uninstall                        │
-└───────────────────────────────────────────────────────┘"
 }
 
 ###################################Install X-UI#########################################################
@@ -1065,8 +667,7 @@ if systemctl is-active --quiet x-ui; then
     x-ui restart
 else
     install_panel
-    # ИСПРАВЛЕНО: ждём создания x-ui.db перед тем, как наполнять таблицу inbounds.
-    # Без этого UPDATE_XUIDB падал с "x-ui.db file not exist!" и панель оставалась пустой.
+    # ИСПРАВЛЕНО: ждём создания x-ui.db перед UPDATE_XUIDB
     local_wait=0
     while [[ ! -f $XUIDB ]]; do
         sleep 1
@@ -1158,8 +759,6 @@ crontab -l | grep -v "certbot\|x-ui\|cloudflareips" | crontab -
 (crontab -l 2>/dev/null; echo '@monthly certbot renew --nginx --non-interactive --post-hook "nginx -s reload" > /dev/null 2>&1;') | crontab -
 
 ##################################ufw###################################################################
-# ИСПРАВЛЕНО: теперь используем ensure_ufw вместо прямой проверки,
-# чтобы гарантировать наличие ufw даже в минимальных образах.
 if command -v ufw >/dev/null 2>&1; then
     ufw disable
     ufw allow 22/tcp
@@ -1169,9 +768,28 @@ if command -v ufw >/dev/null 2>&1; then
 fi
 
 ##################################Show Details##########################################################
-# ИСПРАВЛЕНО: возвращаем полный вывод состояния (OS release, Panel state, xray state, nginx -T).
-# В LLM-версиях этот блок был удалён, что затрудняло диагностику.
 if systemctl is-active --quiet x-ui; then clear
+    # ИСПРАВЛЕНО: выводим меню только после успешной установки
+    echo -e ""
+    echo -e "┌───────────────────────────────────────────────────────┐
+│  ${blue}x-ui control menu usages (subcommands):${plain}              │
+│                                                       │
+│  ${blue}x-ui${plain}              - Admin Management Script          │
+│  ${blue}x-ui start${plain}        - Start                            │
+│  ${blue}x-ui stop${plain}         - Stop                             │
+│  ${blue}x-ui restart${plain}      - Restart                          │
+│  ${blue}x-ui status${plain}       - Current Status                   │
+│  ${blue}x-ui settings${plain}     - Current Settings                 │
+│  ${blue}x-ui enable${plain}       - Enable Autostart on OS Startup   │
+│  ${blue}x-ui disable${plain}      - Disable Autostart on OS Startup  │
+│  ${blue}x-ui log${plain}          - Check logs                       │
+│  ${blue}x-ui banlog${plain}       - Check Fail2ban ban logs          │
+│  ${blue}x-ui update${plain}       - Update                           │
+│  ${blue}x-ui legacy${plain}       - Legacy version                   │
+│  ${blue}x-ui install${plain}      - Install                          │
+│  ${blue}x-ui uninstall${plain}    - Uninstall                        │
+└───────────────────────────────────────────────────────┘"
+    echo ""
     printf '0\n' | x-ui | grep --color=never -i ':'
     msg_inf "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
     nginx -T | grep -i 'ssl_certificate\|ssl_certificate_key'
