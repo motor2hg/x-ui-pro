@@ -82,7 +82,7 @@ done
 ##############################Uninstall#################################################################
 UNINSTALL_XUI(){
 	printf 'y\n' | x-ui uninstall
-	rm -rf "/etc/xui/" "/usr/local/x-ui/" "/usr/bin/x-ui/"
+	rm -rf "/etc/x-ui/" "/usr/local/x-ui/" "/usr/bin/x-ui/"
 	$Pak -y remove nginx nginx-common nginx-core nginx-full python3-certbot-nginx
 	$Pak -y purge nginx nginx-common nginx-core nginx-full python3-certbot-nginx
 	$Pak -y autoremove
