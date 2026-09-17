@@ -524,9 +524,8 @@ json_uri=https://${domain}/${web_path}?name=
 shor=($(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8) $(openssl rand -hex 8))
 
 ########################################Update X-UI Port/Path for first INSTALL#########################
-########################################Update X-UI Port/Path for first INSTALL#########################
 UPDATE_XUIDB(){
-    # ИСПРАВЛЕНО: ждём создания x-ui.db до 30 секунд
+    # Ждём создания x-ui.db до 30 секунд
     local wait_count=0
     while [[ ! -f $XUIDB ]]; do
         sleep 1
@@ -539,14 +538,32 @@ UPDATE_XUIDB(){
 
     x-ui stop
 
-    # ИСПРАВЛЕНО: Удаляем все старые настройки и клиентов, чтобы избежать дубликатов!
-    # Без этого при повторном запуске скрипта или после x-ui setting 
-    # в базе появляются дубли записей с одинаковыми key, 
-    # и x-ui при SELECT берёт первое (устаревшее) значение.
+    # ИСПРАВЛЕНО: СНАЧАЛА вызываем x-ui setting, чтобы он создал webPort и webBasePath в БД
+    # Это гарантирует, что панель будет слушать нужный порт с нужным путём
+    /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
+    sleep 2
+
+    # ПРОВЕРКА: убеждаемся, что x-ui setting записал правильные значения
+    DB_WEB_PORT=$(sqlite3 $XUIDB "SELECT value FROM settings WHERE key='webPort' LIMIT 1;")
+    DB_WEB_PATH=$(sqlite3 $XUIDB "SELECT value FROM settings WHERE key='webBasePath' LIMIT 1;")
+    
+    if [[ "$DB_WEB_PORT" != "$panel_port" ]] || [[ "$DB_WEB_PATH" != "${panel_path}" ]]; then
+        msg_err "x-ui setting did not save webPort/webBasePath correctly!"
+        msg_err "DB has: port=$DB_WEB_PORT, path=$DB_WEB_PATH"
+        msg_err "Expected: port=$panel_port, path=${panel_path}"
+        msg_inf "Forcing values via sqlite3..."
+        sqlite3 $XUIDB <<EOF_FORCE
+DELETE FROM "settings" WHERE "key" IN ('webPort','webBasePath');
+INSERT INTO "settings" ("key", "value") VALUES ("webPort", '${panel_port}');
+INSERT INTO "settings" ("key", "value") VALUES ("webBasePath", '${panel_path}');
+EOF_FORCE
+    fi
+
+    # ИСПРАВЛЕНО: удаляем только sub-настройки, inbounds и client_traffics
+    # НЕ трогаем webPort и webBasePath — они уже установлены правильно!
     sqlite3 $XUIDB <<'EOF_CLEANUP'
 DELETE FROM "settings" WHERE "key" LIKE 'sub%';
-DELETE FROM "settings" WHERE "key" LIKE 'web%';
-DELETE FROM "settings" WHERE "key" IN ('sessionMaxAge','pageSize','expireDiff','trafficDiff','remarkModel','timeLocation','secretEnable','datepicker');
+DELETE FROM "settings" WHERE "key" IN ('sessionMaxAge','pageSize','expireDiff','trafficDiff','remarkModel','timeLocation','secretEnable','datepicker','xrayTemplateConfig');
 DELETE FROM "settings" WHERE "key" LIKE 'tg%';
 DELETE FROM "inbounds";
 DELETE FROM "client_traffics";
@@ -561,12 +578,17 @@ EOF_CLEANUP
     trojan_pass=$(gen_random_string 10)
     emoji_flag=$(LC_ALL=en_US.UTF-8 curl -s https://ipwho.is/ | jq -r '.flag.emoji')
 
-    # ... (дальше идёт ваш существующий код формирования ROUTING_RULES и XRAY_TEMPLATE)
+    # Формируем полный xrayTemplateConfig с routing правилами
+    if [[ "$RU_RULE" == "true" ]]; then
+        ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["ads","geosite:category-ads-all","ext:geosite_RU.dat:category-ads-all","ext:geosite_RU.dat:category-ads"],"outboundTag":"blocked","type":"field"},{"domain":["youtube.com","youtu.be","googlevideo.com","geosite:youtube","ext:geosite_RU.dat:youtube","geosite:category-bank-ru","geosite:category-betting-ru","geosite:category-ecommerce-ru","geosite:category-education-ru","geosite:category-entertainment-ru","geosite:category-forums","geosite:category-forums-ru","geosite:category-gov-ru","geosite:category-media-ru","geosite:category-medicine-ru","geosite:category-retail-ru","geosite:category-ru","geosite:category-tech-media-ru","geosite:category-travel-ru","geosite:genotek-ru","geosite:ideco-ru","geosite:mailru","geosite:mts-ru","geosite:myoffice-ru","geosite:nic-ru","geosite:overclockers-ru","geosite:regru","geosite:rutube","geosite:tbank-ru","geosite:t2-ru","geosite:tld-ru","geosite:mailru-group","geosite:ozon","geosite:wildberries","geosite:yundaex","geosite:yandex"],"outboundTag":"direct","type":"field"},{"ip":["geoip:ru","ext:geoip_RU.dat:ru","ext:geoip_RU.dat:ru-whitelist"],"outboundTag":"direct","type":"field"},{"domain":["geosite:speedtest"],"outboundTag":"IPv4","type":"field"}]'
+    else
+        ROUTING_RULES='[{"inboundTag":["api"],"outboundTag":"api","type":"field"},{"ip":["geoip:private"],"outboundTag":"blocked","type":"field"},{"outboundTag":"blocked","protocol":["bittorrent"],"type":"field"},{"domain":["geosite:category-ads-all"],"outboundTag":"blocked","type":"field"}]'
+    fi
+
+    XRAY_TEMPLATE='{"api":{"services":["HandlerService","LoggerService","StatsService","RoutingService"],"tag":"api"},"inbounds":[{"listen":"127.0.0.1","port":62789,"protocol":"tunnel","settings":{"rewriteAddress":"127.0.0.1"},"tag":"api"}],"log":{"loglevel":"warning"},"outbounds":[{"protocol":"freedom","settings":{},"tag":"direct"},{"protocol":"blackhole","settings":{},"tag":"blocked"},{"protocol":"freedom","settings":{"domainStrategy":"UseIPv4"},"tag":"IPv4"},{"protocol":"freedom","settings":{},"tag":"IPv6"},{"protocol":"blackhole","settings":{},"tag":"block"}],"policy":{"levels":{"0":{"statsUserDownlink":true,"statsUserOnline":true,"statsUserUplink":true}},"system":{"statsInboundDownlink":true,"statsInboundUplink":true,"statsOutboundDownlink":false,"statsOutboundUplink":false}},"routing":{"domainStrategy":"AsIs","rules":'$ROUTING_RULES'},"stats":{}}'
 
     sqlite3 $XUIDB <<EOF
--- ИСПРАВЛЕНО: НЕ вставляем subCertFile и subKeyFile!
--- Sub-сервер будет работать на обычном HTTP,
--- TLS termination делает nginx.
+-- Sub-настройки (webPort и webBasePath НЕ трогаем!)
 INSERT INTO "settings" ("key", "value") VALUES ("subPort",  '${sub_port}');
 INSERT INTO "settings" ("key", "value") VALUES ("subPath",  '/${sub_path}/');
 INSERT INTO "settings" ("key", "value") VALUES ("subURI",  '${sub_uri}');
@@ -584,12 +606,11 @@ INSERT INTO "settings" ("key", "value") VALUES ("subJsonFragment",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonNoises",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonMux",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("subJsonRules",  '');
+-- Прочие настройки панели
 INSERT INTO "settings" ("key", "value") VALUES ("webListen",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webDomain",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webCertFile",  '');
 INSERT INTO "settings" ("key", "value") VALUES ("webKeyFile",  '');
-INSERT INTO "settings" ("key", "value") VALUES ("webPort",  '${panel_port}');
-INSERT INTO "settings" ("key", "value") VALUES ("webBasePath",  '${panel_path}');
 INSERT INTO "settings" ("key", "value") VALUES ("sessionMaxAge",  '60');
 INSERT INTO "settings" ("key", "value") VALUES ("pageSize",  '50');
 INSERT INTO "settings" ("key", "value") VALUES ("expireDiff",  '0');
@@ -605,18 +626,51 @@ INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('3','1','firstX','0','0','0','0','0');
 INSERT INTO "client_traffics" ("inbound_id","enable","email","up","down","expiry_time","total","reset") VALUES ('4','1','firstT','0','0','0','0','0');
 
--- (далее ваши INSERT INTO "inbounds" без изменений)
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} reality','1','0','','8443','vless',
+'{
+"clients": [{"id":"${client_id}","flow":"xtls-rprx-vision","email":"first","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{
+"network": "tcp",
+"security": "reality",
+"externalProxy": [{"forceTls":"same","dest":"${reality_domain}","port":443,"remark":""}],
+"realitySettings": {"show": false,"xver":0,"target":"127.0.0.1:9443","serverNames":["$reality_domain"],"privateKey":"${private_key}","minClient":"","maxClient":"","maxTimediff":0,"shortIds":["${shor[0]}","${shor[1]}","${shor[2]}","${shor[3]}","${shor[4]}","${shor[5]}","${shor[6]}","${shor[7]}"],"settings":{"publicKey":"${public_key}","fingerprint":"chrome","serverName":"","spiderX":"/"}},
+"tcpSettings":{"acceptProxyProtocol":true,"header":{"type":"none"}}
+}',
+'inbound-8443','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} ws','1','0','','${ws_port}','vless',
+'{
+"clients": [{"id":"${client_id2}","flow":"","email":"first_1","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{ "network":"ws","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"wsSettings":{"acceptProxyProtocol":false,"path":"/${ws_port}/${ws_path}","host":"${domain}","headers":{}} }',
+'inbound-${ws_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} xhttp','1','0','/dev/shm/uds2023.sock,0666','0','vless',
+'{
+"clients": [{"id":"${client_id3}","flow":"","email":"firstX","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":0,"subId":"first","reset":0,"created_at":1756726925000,"updated_at":1756726925000}],
+"decryption":"none","fallbacks":[]
+}',
+'{ "network":"xhttp","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"xhttpSettings":{"path":"/${xhttp_path}","host":"${domain}","headers":{},"scMaxBufferedPosts":30,"scMaxEachPostBytes":"1000000","noSSEHeader":false,"xPaddingBytes":"100-1000","mode":"packet-up"},"sockopt":{"acceptProxyProtocol":false,"tcpFastOpen":true,"mark":0,"tproxy":"off","tcpMptcp":true,"tcpNoDelay":true,"domainStrategy":"UseIP","tcpMaxSeg":1440,"dialerProxy":"","tcpKeepAliveInterval":0,"tcpKeepAliveIdle":300,"tcpUserTimeout":10000,"tcpcongestion":"bbr","V6Only":false,"tcpWindowClamp":600,"interface":""} }',
+'inbound-/dev/shm/uds2023.sock,0666:0|','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
+INSERT INTO "inbounds" ("user_id","up","down","total","remark","enable","expiry_time","listen","port","protocol","settings","stream_settings","tag","sniffing") VALUES (
+'1','0','0','0','${emoji_flag} trojan-grpc','1','0','','${trojan_port}','trojan',
+'{
+"clients": [{"comment":"","created_at":1756726925000,"email":"firstT","enable":true,"expiryTime":0,"limitIp":0,"password":"${trojan_pass}","reset":0,"subId":"first","tgId":0,"totalGB":0,"updated_at":1756726925000}],
+"fallbacks":[]
+}',
+'{ "network":"grpc","security":"none","externalProxy":[{"forceTls":"tls","dest":"${domain}","port":443,"remark":""}],"grpcSettings":{"serviceName":"/${trojan_port}/${trojan_path}","authority":"${domain}","multiMode":false} }',
+'inbound-${trojan_port}','{ "enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false }'
+);
 EOF
 
-    # ИСПРАВЛЕНО: вызываем x-ui setting ПОСЛЕ заполнения базы,
-    # чтобы он не перезаписал наши настройки подписки.
-    # Но т.к. мы удалили webPort/webBasePath выше и вставили заново,
-    # вызов setting перезапишет только их (и это ок, значения совпадают).
-    /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${panel_port}" -webBasePath "${panel_path}"
-    
-    # НЕ вызываем x-ui cert! Он может перезаписать webCertFile/webKeyFile.
-    # Панель работает через nginx proxy, ей не нужны свои сертификаты.
-    
+    # НЕ вызываем x-ui cert — панель работает через nginx proxy, ей не нужны свои сертификаты
     x-ui start
 }
 
