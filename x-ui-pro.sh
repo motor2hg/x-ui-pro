@@ -634,7 +634,7 @@ INSERT INTO "inbounds" ("id","user_id","up","down","total","remark","enable","ex
 );
 EOF
 
-    # Вставка клиентов в таблицу clients (новая архитектура 3.8.5)
+    # Вставка клиентов в таблицу clients (новая архитектура 3.10.0)
     sqlite3 $XUIDB <<EOF
 INSERT INTO "clients" ("id","email","sub_id","uuid","password","auth","flow","security","limit_ip","limit_hwid","total_gb","expiry_time","enable","tg_id","group_name","comment","reset","reset_day","reset_max","traffic_reset","traffic_reset_day","created_at","updated_at") VALUES 
 (1, 'first', 'first', '${client_id}', '', '', 'xtls-rprx-vision', '', 0, 0, 0, 0, 1, 0, '', '', 0, 0, 0, 'never', 1, ${timestamp}, ${timestamp}),
@@ -713,7 +713,7 @@ config_after_install() {
 install_panel() {
     apt-get update && apt-get install -y -q wget curl tar tzdata
     cd /usr/local/
-    tag_version="v3.8.5"
+    tag_version="v3.10.0"
     latest_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     if [[ -n "$latest_version" ]]; then
         tag_version="$latest_version"
